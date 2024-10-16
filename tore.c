@@ -6,6 +6,8 @@
 #define NOB_STRIP_PREFIX
 #include "nob.h"
 
+#define TORE_FILENAME ".tore"
+
 #define LOG_SQLITE3_ERROR(db) fprintf(stderr, "%s:%d: SQLITE3 ERROR: %s\n", __FILE__, __LINE__, sqlite3_errmsg(db))
 
 const char *migrations[] = {
@@ -336,11 +338,11 @@ int main(int argc, char **argv)
     const char *program_name = shift(argv, argc);
     const char *home_path = getenv("HOME");
     if (home_path == NULL) {
-        fprintf(stderr, "ERROR: No $HOME environment variable is setup. We need it to find the location of ~/.tore database.a");
+        fprintf(stderr, "ERROR: No $HOME environment variable is setup. We need it to find the location of ~/"TORE_FILENAME" database.\n");
         return_defer(1);
     }
 
-    const char *tore_path = temp_sprintf("%s/.tore", home_path);
+    const char *tore_path = temp_sprintf("%s/"TORE_FILENAME, home_path);
 
     int ret = sqlite3_open(tore_path, &db);
     if (ret != SQLITE_OK) {
