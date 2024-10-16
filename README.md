@@ -1,8 +1,5 @@
 # Tore (TOtall REcall)
 
-> [!WARNING]
-> It is not recommended to use this application yet, because the migration system is not implemented yet. So the database might be broken between commits.
-
 ## Quick Start
 
 ```console

@@ -8,33 +8,98 @@
 
 #define LOG_SQLITE3_ERROR(db) fprintf(stderr, "%s:%d: SQLITE3 ERROR: %s\n", __FILE__, __LINE__, sqlite3_errmsg(db))
 
-bool create_schema(sqlite3 *db)
+const char *migrations[] = {
+    "CREATE TABLE IF NOT EXISTS Notifications (\n"
+    "    id INTEGER PRIMARY KEY ASC,\n"
+    "    title TEXT NOT NULL,\n"
+    "    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,\n"
+    "    dismissed_at DATETIME DEFAULT NULL\n"
+    ");\n",
+    "CREATE TABLE IF NOT EXISTS Reminders (\n"
+    "    id INTEGER PRIMARY KEY ASC,\n"
+    "    title TEXT NOT NULL,\n"
+    "    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,\n"
+    "    scheduled_at DATE NOT NULL,\n"
+    "    period TEXT DEFAULT NULL,\n"
+    "    finished_at DATETIME DEFAULT NULL\n"
+    ");\n",
+};
+
+// TODO: can we just extract tore_path from db somehow?
+bool create_schema(sqlite3 *db, const char *tore_path)
 {
-    const char *sql =
-        "CREATE TABLE IF NOT EXISTS Notifications (\n"
-        "    id INTEGER PRIMARY KEY ASC,\n"
-        "    title TEXT NOT NULL,\n"
-        "    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,\n"
-        "    dismissed_at DATETIME DEFAULT NULL\n"
-        ")\n";
+    bool result = true;
+    sqlite3_stmt *stmt = NULL;
+    const char *sql = 
+        "CREATE TABLE IF NOT EXISTS Migrations (\n"
+        "    applied_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,\n"
+        "    query TEXT NOT NULL\n"
+        ");\n";
     if (sqlite3_exec(db, sql, NULL, NULL, NULL) != SQLITE_OK) {
         LOG_SQLITE3_ERROR(db);
-        return false;
+        return_defer(false);
     }
-    sql =
-        "CREATE TABLE IF NOT EXISTS Reminders (\n"
-        "    id INTEGER PRIMARY KEY ASC,\n"
-        "    title TEXT NOT NULL,\n"
-        "    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,\n"
-        "    scheduled_at DATE NOT NULL,\n"
-        "    period TEXT DEFAULT NULL,\n"
-        "    finished_at DATETIME DEFAULT NULL\n"
-        ")\n";
-    if (sqlite3_exec(db, sql, NULL, NULL, NULL) != SQLITE_OK) {
+
+    if (sqlite3_prepare_v2(db, "SELECT query FROM Migrations;", -1, &stmt, NULL)!= SQLITE_OK) {
         LOG_SQLITE3_ERROR(db);
-        return false;
+        return_defer(false);
     }
-    return true;
+
+    size_t index = 0;
+    int ret = sqlite3_step(stmt);
+    for (; ret == SQLITE_ROW; ++index) {
+        if (index >= ARRAY_LEN(migrations)) {
+            fprintf(stderr, "ERROR: %s: Database scheme is too new. Contains more migrations applied than expected. Update your application.\n", tore_path);
+            return_defer(false);
+        }
+        const char *query = (const char *)sqlite3_column_text(stmt, 0);
+        if (strcmp(query, migrations[index]) != 0) {
+            fprintf(stderr, "ERROR: %s: Invalid database scheme. Mismatch in migration %zu:\n", tore_path, index);
+            fprintf(stderr, "EXPECTED: %s\n", migrations[index]);
+            fprintf(stderr, "FOUND: %s\n", query);
+            return_defer(false);
+        }
+        ret = sqlite3_step(stmt);
+    }
+
+    if (ret != SQLITE_DONE) {
+        LOG_SQLITE3_ERROR(db);
+        return_defer(false);
+    }
+    sqlite3_finalize(stmt);
+    stmt = NULL;
+
+    for (; index < ARRAY_LEN(migrations); ++index) {
+        printf("INFO: %s: applying migration %zu\n", tore_path, index);
+        printf("%s\n", migrations[index]);
+        if (sqlite3_exec(db, migrations[index], NULL, NULL, NULL) != SQLITE_OK) {
+            LOG_SQLITE3_ERROR(db);
+            return_defer(false);
+        }
+
+        int ret = sqlite3_prepare_v2(db, "INSERT INTO Migrations (query) VALUES (?)", -1, &stmt, NULL);
+        if (ret != SQLITE_OK) {
+            LOG_SQLITE3_ERROR(db);
+            return_defer(false);
+        }
+
+        if (sqlite3_bind_text(stmt, 1, migrations[index], strlen(migrations[index]), NULL) != SQLITE_OK) {
+            LOG_SQLITE3_ERROR(db);
+            return_defer(false);
+        }
+
+        if (sqlite3_step(stmt) != SQLITE_DONE) {
+            LOG_SQLITE3_ERROR(db);
+            return_defer(false);
+        }
+
+        sqlite3_finalize(stmt);
+        stmt = NULL;
+    }
+
+defer:
+    if (stmt) sqlite3_finalize(stmt);
+    return result;
 }
 
 typedef struct {
@@ -230,6 +295,39 @@ defer:
     return result;
 }
 
+bool show_active_reminders(sqlite3 *db)
+{
+    bool result = true;
+
+    sqlite3_stmt *stmt = NULL;
+
+    int ret = sqlite3_prepare_v2(db, "SELECT title, scheduled_at, period FROM Reminders WHERE finished_at IS NULL", -1, &stmt, NULL);
+    if (ret != SQLITE_OK) {
+        LOG_SQLITE3_ERROR(db);
+        return_defer(false);
+    }
+
+    ret = sqlite3_step(stmt);
+    for (int index = 0; ret == SQLITE_ROW; ++index) {
+        const char *title = (const char *)sqlite3_column_text(stmt, 0);
+        const char *scheduled_at = (const char *)sqlite3_column_text(stmt, 1);
+        const char *period = (const char *)sqlite3_column_text(stmt, 2);
+        if (period) {
+            printf("%s (Scheduled at %s every %s)\n", title, scheduled_at, period);
+        } else {
+            printf("%s (Scheduled at %s)\n", title, scheduled_at);
+        }
+        ret = sqlite3_step(stmt);
+    }
+
+    if (ret != SQLITE_DONE) {
+        LOG_SQLITE3_ERROR(db);
+        return_defer(false);
+    }
+defer:
+    return result;
+}
+
 int main(int argc, char **argv)
 {
     int result = 0;
@@ -250,7 +348,7 @@ int main(int argc, char **argv)
         return_defer(1);
     }
 
-    if (!create_schema(db)) return_defer(1);
+    if (!create_schema(db, tore_path)) return_defer(1);
 
     if (argc <= 0) {
         if (!fire_off_reminders(db)) return_defer(1);
@@ -287,28 +385,36 @@ int main(int argc, char **argv)
         return_defer(0);
     }
 
+    if (strcmp(cmd, "forget") == 0) {
+        TODO("remove reminders");
+        return_defer(0);
+    }
+
     if (strcmp(cmd, "remind") == 0) {
         if (argc <= 0) {
-            fprintf(stderr, "Usage: %s remind [<title> <date> [period]]\n", program_name);
-            fprintf(stderr, "ERROR: expected title\n");
-            return_defer(1);
+            if (!show_active_reminders(db)) return_defer(1);
+            return_defer(0);
         }
+
         const char *title = shift(argv, argc);
-
         if (argc <= 0) {
-            fprintf(stderr, "Usage: %s remind [<title> <date> [period]]\n", program_name);
-            fprintf(stderr, "ERROR: expected date\n");
+            fprintf(stderr, "Usage: %s remind [<title> <scheduled_at> [period]]\n", program_name);
+            fprintf(stderr, "ERROR: expected scheduled_at\n");
             return_defer(1);
         }
 
-        const char *date = shift(argv, argc);
+        // TODO: verify the format of scheduled_at during parsing of the CLI arguments
+        // TODO: research if it's possible to enforce the date format on the level of sqlite3 contraints
+        const char *scheduled_at = shift(argv, argc); 
 
+        // TODO: verify the format of period during parsing of the CLI arguments
         const char *period = NULL;
         if (argc > 0) {
             period = shift(argv, argc);
         }
 
-        if (!create_new_reminder(db, title, date, period)) return_defer(1);
+        if (!create_new_reminder(db, title, scheduled_at, period)) return_defer(1);
+        if (!show_active_reminders(db)) return_defer(1);
         return_defer(0);
     }
 
