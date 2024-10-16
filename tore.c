@@ -330,6 +330,20 @@ defer:
     return result;
 }
 
+bool verify_date_format(const char *date)
+{
+    // Who needs Regular Expressions?
+    const char *format = "dddd-dd-dd";
+    for (; *format && *date; format++, date++) {
+        switch (*format) {
+            case 'd': if (!isdigit(*date)) return false; break;
+            case '-': if (*date != '-')    return false; break;
+            default:  UNREACHABLE("verify_date_format");
+        }
+    }
+    return !(*format || *date);
+}
+
 int main(int argc, char **argv)
 {
     int result = 0;
@@ -405,9 +419,12 @@ int main(int argc, char **argv)
             return_defer(1);
         }
 
-        // TODO: verify the format of scheduled_at during parsing of the CLI arguments
         // TODO: research if it's possible to enforce the date format on the level of sqlite3 contraints
         const char *scheduled_at = shift(argv, argc); 
+        if (!verify_date_format(scheduled_at)) {
+            fprintf(stderr, "ERROR: %s is not a valid date format\n", scheduled_at);
+            return_defer(1);
+        }
 
         // TODO: verify the format of period during parsing of the CLI arguments
         const char *period = NULL;
