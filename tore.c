@@ -6,10 +6,12 @@
 #define NOB_STRIP_PREFIX
 #include "nob.h"
 
+// TODO: Explore the idea of testing tore in a separate chroot environment so to not damage the "production" ~/.tore
 #define TORE_FILENAME ".tore"
 
 #define LOG_SQLITE3_ERROR(db) fprintf(stderr, "%s:%d: SQLITE3 ERROR: %s\n", __FILE__, __LINE__, sqlite3_errmsg(db))
 
+// TODO: Make notifications have a reference to the reminder that created them
 const char *migrations[] = {
     "CREATE TABLE IF NOT EXISTS Notifications (\n"
     "    id INTEGER PRIMARY KEY ASC,\n"
@@ -233,6 +235,55 @@ defer:
     return result;
 }
 
+typedef struct {
+    int id;
+    const char *title;
+    const char *scheduled_at;
+    const char *period;
+} Reminder;
+
+typedef struct {
+    Reminder *items;
+    size_t count;
+    size_t capacity;
+} Reminders;
+
+bool load_active_reminders(sqlite3 *db, Reminders *reminders)
+{
+    bool result = true;
+
+    sqlite3_stmt *stmt = NULL;
+
+    int ret = sqlite3_prepare_v2(db, "SELECT id, title, scheduled_at, period FROM Reminders WHERE finished_at IS NULL", -1, &stmt, NULL);
+    if (ret != SQLITE_OK) {
+        LOG_SQLITE3_ERROR(db);
+        return_defer(false);
+    }
+
+    ret = sqlite3_step(stmt);
+    for (int index = 0; ret == SQLITE_ROW; ++index) {
+        int id = sqlite3_column_int(stmt, 0);
+        const char *title = strdup((const char *)sqlite3_column_text(stmt, 1));
+        const char *scheduled_at = strdup((const char *)sqlite3_column_text(stmt, 2));
+        const char *period = (const char *)sqlite3_column_text(stmt, 3);
+        if (period != NULL) period = strdup(period);
+        da_append(reminders, ((Reminder) {
+            .id = id,
+            .title = title,
+            .scheduled_at = scheduled_at,
+            .period = period,
+        }));
+        ret = sqlite3_step(stmt);
+    }
+
+    if (ret != SQLITE_DONE) {
+        LOG_SQLITE3_ERROR(db);
+        return_defer(false);
+    }
+defer:
+    return result;
+}
+
 bool create_new_reminder(sqlite3 *db, const char *title, const char *scheduled_at, const char *period)
 {
     bool result = true;
@@ -301,32 +352,64 @@ bool show_active_reminders(sqlite3 *db)
 {
     bool result = true;
 
+    Reminders reminders = {0};
+
+    if (!load_active_reminders(db, &reminders)) return_defer(false);
+    for (size_t i = 0; i < reminders.count; ++i) {
+        Reminder *it = &reminders.items[i];
+        if (it->period) {
+            fprintf(stderr, "%zu: %s (Scheduled at %s every %s)\n", i, it->title, it->scheduled_at, it->period);
+        } else {
+            fprintf(stderr, "%zu: %s (Scheduled at %s)\n", i, it->title, it->scheduled_at);
+        }
+    }
+
+defer:
+    free(reminders.items);
+    return result;
+}
+
+bool remove_reminder_by_id(sqlite3 *db, int id)
+{
+    bool result = true;
+
     sqlite3_stmt *stmt = NULL;
 
-    int ret = sqlite3_prepare_v2(db, "SELECT title, scheduled_at, period FROM Reminders WHERE finished_at IS NULL", -1, &stmt, NULL);
+    int ret = sqlite3_prepare_v2(db, "UPDATE Reminders SET finished_at = CURRENT_TIMESTAMP WHERE id = ?", -1, &stmt, NULL);
     if (ret != SQLITE_OK) {
         LOG_SQLITE3_ERROR(db);
         return_defer(false);
     }
 
-    ret = sqlite3_step(stmt);
-    for (int index = 0; ret == SQLITE_ROW; ++index) {
-        const char *title = (const char *)sqlite3_column_text(stmt, 0);
-        const char *scheduled_at = (const char *)sqlite3_column_text(stmt, 1);
-        const char *period = (const char *)sqlite3_column_text(stmt, 2);
-        if (period) {
-            printf("%s (Scheduled at %s every %s)\n", title, scheduled_at, period);
-        } else {
-            printf("%s (Scheduled at %s)\n", title, scheduled_at);
-        }
-        ret = sqlite3_step(stmt);
-    }
-
-    if (ret != SQLITE_DONE) {
+    if (sqlite3_bind_int(stmt, 1, id) != SQLITE_OK) {
         LOG_SQLITE3_ERROR(db);
         return_defer(false);
     }
+
+    if (sqlite3_step(stmt) != SQLITE_DONE) {
+        LOG_SQLITE3_ERROR(db);
+        return_defer(false);
+    }
+
 defer:
+    if (stmt) sqlite3_finalize(stmt);
+    return result;
+}
+
+bool remove_reminder_by_number(sqlite3 *db, int number)
+{
+    bool result = true;
+
+    Reminders reminders = {0};
+    if (!load_active_reminders(db, &reminders)) return_defer(false);
+    if (!(0 <= number && (size_t)number < reminders.count)) {
+        fprintf(stderr, "ERROR: %d is not a valid index of a reminder\n", number);
+        return_defer(false);
+    }
+    if (!remove_reminder_by_id(db, reminders.items[number].id)) return_defer(false);
+
+defer:
+    free(reminders.items);
     return result;
 }
 
@@ -374,6 +457,8 @@ int main(int argc, char **argv)
 
     const char *cmd = shift(argv, argc);
 
+    // TODO: implement `help` command
+
     if (strcmp(cmd, "dismiss") == 0) {
         if (argc <= 0) {
             fprintf(stderr, "Usage: %s dismiss <id>\n", program_name);
@@ -402,7 +487,14 @@ int main(int argc, char **argv)
     }
 
     if (strcmp(cmd, "forget") == 0) {
-        TODO("remove reminders");
+        if (argc <= 0) {
+            fprintf(stderr, "Usage: %s forget <number>\n", program_name);
+            fprintf(stderr, "ERROR: expected number\n");
+            return_defer(1);
+        }
+        int number = atoi(shift(argv, argc));
+        if (!remove_reminder_by_number(db, number)) return_defer(1);
+        if (!show_active_reminders(db)) return_defer(1);
         return_defer(0);
     }
 
@@ -428,9 +520,7 @@ int main(int argc, char **argv)
 
         // TODO: verify the format of period during parsing of the CLI arguments
         const char *period = NULL;
-        if (argc > 0) {
-            period = shift(argv, argc);
-        }
+        if (argc > 0) period = shift(argv, argc);
 
         if (!create_new_reminder(db, title, scheduled_at, period)) return_defer(1);
         if (!show_active_reminders(db)) return_defer(1);
