@@ -433,6 +433,12 @@ int main(int argc, char **argv)
     sqlite3 *db = NULL;
 
     const char *program_name = shift(argv, argc);
+
+    const char *command_name= "checkout";
+    if (argc > 0) command_name = shift(argv, argc);
+
+    // TODO: implement `help` command
+
     const char *home_path = getenv("HOME");
     if (home_path == NULL) {
         fprintf(stderr, "ERROR: No $HOME environment variable is setup. We need it to find the location of ~/"TORE_FILENAME" database.\n");
@@ -449,7 +455,7 @@ int main(int argc, char **argv)
 
     if (!create_schema(db, tore_path)) return_defer(1);
 
-    if (argc <= 0) {
+    if (strcmp(command_name, "checkout") == 0) {
         if (!fire_off_reminders(db)) return_defer(1);
         if (!show_active_notifications(db)) return_defer(1);
         // TODO: show reminders that are about to fire off
@@ -457,11 +463,7 @@ int main(int argc, char **argv)
         return_defer(0);
     }
 
-    const char *cmd = shift(argv, argc);
-
-    // TODO: implement `help` command
-
-    if (strcmp(cmd, "dismiss") == 0) {
+    if (strcmp(command_name, "dismiss") == 0) {
         if (argc <= 0) {
             fprintf(stderr, "Usage: %s dismiss <id>\n", program_name);
             fprintf(stderr, "ERROR: expected id\n");
@@ -474,7 +476,7 @@ int main(int argc, char **argv)
         return_defer(0);
     }
 
-    if (strcmp(cmd, "notify") == 0) {
+    if (strcmp(command_name, "notify") == 0) {
         if (argc <= 0) {
             fprintf(stderr, "Usage: %s notify <title>\n", program_name);
             fprintf(stderr, "ERROR: expected title\n");
@@ -488,7 +490,7 @@ int main(int argc, char **argv)
         return_defer(0);
     }
 
-    if (strcmp(cmd, "forget") == 0) {
+    if (strcmp(command_name, "forget") == 0) {
         if (argc <= 0) {
             fprintf(stderr, "Usage: %s forget <number>\n", program_name);
             fprintf(stderr, "ERROR: expected number\n");
@@ -500,7 +502,7 @@ int main(int argc, char **argv)
         return_defer(0);
     }
 
-    if (strcmp(cmd, "remind") == 0) {
+    if (strcmp(command_name, "remind") == 0) {
         if (argc <= 0) {
             if (!show_active_reminders(db)) return_defer(1);
             return_defer(0);
@@ -529,7 +531,7 @@ int main(int argc, char **argv)
         return_defer(0);
     }
 
-    fprintf(stderr, "ERROR: unknown command %s\n", cmd);
+    fprintf(stderr, "ERROR: unknown command %s\n", command_name);
     return_defer(1);
 
 defer:
