@@ -515,6 +515,7 @@ int main(int argc, char **argv)
             return_defer(1);
         }
 
+        // TODO: Allow the scheduled_at to be things like "today", "tomorrow", etc
         // TODO: research if it's possible to enforce the date format on the level of sqlite3 contraints
         const char *scheduled_at = shift(argv, argc); 
         if (!verify_date_format(scheduled_at)) {
