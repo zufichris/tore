@@ -26,8 +26,5 @@ int main(int argc, char **argv)
     nob_cmd_append(&cmd, "cc", "-Wall", "-Wextra", "-ggdb", "-I./sqlite-amalgamation-3460100/", "-o", "build/tore", "tore.c", "build/sqlite3.o");
     if (!nob_cmd_run_sync_and_reset(&cmd)) return false;
 
-    // nob_cmd_append(&cmd, "build/tore");
-    // if (!nob_cmd_run_sync_and_reset(&cmd)) return false;
-
     return 0;
 }
