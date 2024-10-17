@@ -452,6 +452,8 @@ int main(int argc, char **argv)
     if (argc <= 0) {
         if (!fire_off_reminders(db)) return_defer(1);
         if (!show_active_notifications(db)) return_defer(1);
+        // TODO: show reminders that are about to fire off
+        //   Maybe they should fire off a "warning" notification before doing the main one?
         return_defer(0);
     }
 
