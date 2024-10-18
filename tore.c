@@ -10,6 +10,8 @@
 
 #define LOG_SQLITE3_ERROR(db) fprintf(stderr, "%s:%d: SQLITE3 ERROR: %s\n", __FILE__, __LINE__, sqlite3_errmsg(db))
 
+// TODO: Use local time for everything
+
 // TODO: Make notifications have a reference to the reminder that created them
 const char *migrations[] = {
     "CREATE TABLE IF NOT EXISTS Notifications (\n"
