@@ -6,7 +6,6 @@
 #define NOB_STRIP_PREFIX
 #include "nob.h"
 
-// TODO: Explore the idea of testing tore in a separate chroot environment so to not damage the "production" ~/.tore
 #define TORE_FILENAME ".tore"
 
 #define LOG_SQLITE3_ERROR(db) fprintf(stderr, "%s:%d: SQLITE3 ERROR: %s\n", __FILE__, __LINE__, sqlite3_errmsg(db))
