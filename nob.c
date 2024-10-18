@@ -46,7 +46,7 @@ int main(int argc, char **argv)
         da_append_many(&cmd, argv, argc);
         if (!nob_cmd_run_sync_and_reset(&cmd)) return 1;
 #else
-        nob_log(ERROR, "%s command is only supported on Linux\n", program_name);
+        nob_log(ERROR, "%s command is only supported on Linux\n", command_name);
 #endif // __linux__
         return 0;
     }
