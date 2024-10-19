@@ -10,8 +10,6 @@
 
 #define LOG_SQLITE3_ERROR(db) fprintf(stderr, "%s:%d: SQLITE3 ERROR: %s\n", __FILE__, __LINE__, sqlite3_errmsg(db))
 
-// TODO: Use local time for everything
-
 // TODO: Make notifications have a reference to the reminder that created them
 const char *migrations[] = {
     "CREATE TABLE IF NOT EXISTS Notifications (\n"
@@ -124,7 +122,7 @@ bool load_active_notifications(sqlite3 *db, Notifications *notifs)
     bool result = true;
     sqlite3_stmt *stmt = NULL;
 
-    int ret = sqlite3_prepare_v2(db, "SELECT id, title, created_at FROM Notifications WHERE dismissed_at IS NULL", -1, &stmt, NULL);
+    int ret = sqlite3_prepare_v2(db, "SELECT id, title, datetime(created_at, 'localtime') FROM Notifications WHERE dismissed_at IS NULL", -1, &stmt, NULL);
     if (ret != SQLITE_OK) {
         LOG_SQLITE3_ERROR(db);
         return_defer(false);
@@ -317,6 +315,7 @@ defer:
     return result;
 }
 
+// NOTE: The general policy of the application is that all the date times are stored in GMT, but before displaying them and/or making logical decisions upon them they are converted to localtime.
 bool fire_off_reminders(sqlite3 *db)
 {
     bool result = true;
@@ -324,21 +323,21 @@ bool fire_off_reminders(sqlite3 *db)
     sqlite3_stmt *stmt = NULL;
 
     // Creating new notifications from fired off reminders
-    const char *sql = "INSERT INTO Notifications (title) SELECT title FROM Reminders WHERE scheduled_at <= CURRENT_DATE AND finished_at IS NULL";
+    const char *sql = "INSERT INTO Notifications (title) SELECT title FROM Reminders WHERE scheduled_at <= date('now', 'localtime') AND finished_at IS NULL";
     if (sqlite3_exec(db, sql, NULL, NULL, NULL) != SQLITE_OK) {
         LOG_SQLITE3_ERROR(db);
         return_defer(false);
     }
 
     // Finish all the non-periodic reminders
-    sql = "UPDATE Reminders SET finished_at = CURRENT_TIMESTAMP WHERE scheduled_at <= CURRENT_DATE AND finished_at IS NULL AND period is NULL";
+    sql = "UPDATE Reminders SET finished_at = CURRENT_TIMESTAMP WHERE scheduled_at <= date('now', 'localtime') AND finished_at IS NULL AND period is NULL";
     if (sqlite3_exec(db, sql, NULL, NULL, NULL) != SQLITE_OK) {
         LOG_SQLITE3_ERROR(db);
         return_defer(false);
     }
 
     // Reschedule all the period reminders
-    sql = "UPDATE Reminders SET scheduled_at = date(scheduled_at, period) WHERE scheduled_at <= CURRENT_DATE AND finished_at IS NULL AND period is NOT NULL";
+    sql = "UPDATE Reminders SET scheduled_at = date(scheduled_at, period) WHERE scheduled_at <= date('now', 'localtime') AND finished_at IS NULL AND period is NOT NULL";
     if (sqlite3_exec(db, sql, NULL, NULL, NULL) != SQLITE_OK) {
         LOG_SQLITE3_ERROR(db);
         return_defer(false);
