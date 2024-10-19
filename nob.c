@@ -35,6 +35,7 @@ int main(int argc, char **argv)
     if (!build_sqlite3(&cmd)) return 1;
     nob_cmd_append(&cmd, "cc", "-Wall", "-Wextra", "-ggdb", "-static", "-I./sqlite-amalgamation-3460100/", "-o", BUILD_FOLDER"tore", "tore.c", BUILD_FOLDER"sqlite3.o");
     if (!nob_cmd_run_sync_and_reset(&cmd)) return 1;
+    // TODO: bake git hash into executable
 
     if (argc <= 0) return 0;
     const char *command_name = shift(argv, argc);
