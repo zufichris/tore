@@ -10,8 +10,8 @@
 
 #define LOG_SQLITE3_ERROR(db) fprintf(stderr, "%s:%d: SQLITE3 ERROR: %s\n", __FILE__, __LINE__, sqlite3_errmsg(db))
 
-// TODO: Make notifications have a reference to the reminder that created them
 const char *migrations[] = {
+    // Initial scheme
     "CREATE TABLE IF NOT EXISTS Notifications (\n"
     "    id INTEGER PRIMARY KEY ASC,\n"
     "    title TEXT NOT NULL,\n"
@@ -26,6 +26,20 @@ const char *migrations[] = {
     "    period TEXT DEFAULT NULL,\n"
     "    finished_at DATETIME DEFAULT NULL\n"
     ");\n",
+
+    // Add reference to the Reminder that created the Notification
+    "ALTER TABLE Notifications RENAME TO Notifications_old;\n"
+    "CREATE TABLE IF NOT EXISTS Notifications (\n"
+    "    id INTEGER PRIMARY KEY ASC,\n"
+    "    title TEXT NOT NULL,\n"
+    "    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,\n"
+    "    dismissed_at DATETIME DEFAULT NULL,\n"
+    "    reminder_id INTEGER DEFAULT NULL,\n"
+    "    FOREIGN KEY (reminder_id) REFERENCES Reminders(id)\n"
+    ");\n"
+    "INSERT INTO Notifications (id, title, created_at, dismissed_at)\n"
+    "SELECT id, title, created_at, dismissed_at FROM Notifications_old;\n"
+    "DROP TABLE Notifications_old;\n"
 };
 
 // TODO: can we just extract tore_path from db somehow?
@@ -74,6 +88,7 @@ bool create_schema(sqlite3 *db, const char *tore_path)
 
     for (; index < ARRAY_LEN(migrations); ++index) {
         printf("INFO: %s: applying migration %zu\n", tore_path, index);
+        // TODO: put tracing of the migration queries behind an environment variable and enable it only in chroot
         printf("%s\n", migrations[index]);
         if (sqlite3_exec(db, migrations[index], NULL, NULL, NULL) != SQLITE_OK) {
             LOG_SQLITE3_ERROR(db);
@@ -323,7 +338,7 @@ bool fire_off_reminders(sqlite3 *db)
     sqlite3_stmt *stmt = NULL;
 
     // Creating new notifications from fired off reminders
-    const char *sql = "INSERT INTO Notifications (title) SELECT title FROM Reminders WHERE scheduled_at <= date('now', 'localtime') AND finished_at IS NULL";
+    const char *sql = "INSERT INTO Notifications (title, reminder_id) SELECT title, id FROM Reminders WHERE scheduled_at <= date('now', 'localtime') AND finished_at IS NULL";
     if (sqlite3_exec(db, sql, NULL, NULL, NULL) != SQLITE_OK) {
         LOG_SQLITE3_ERROR(db);
         return_defer(false);
