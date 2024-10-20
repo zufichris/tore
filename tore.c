@@ -86,10 +86,10 @@ bool create_schema(sqlite3 *db, const char *tore_path)
     sqlite3_finalize(stmt);
     stmt = NULL;
 
+    bool tore_trace_migration_queries = getenv("TORE_TRACE_MIGRATION_QUERIES") != NULL;
     for (; index < ARRAY_LEN(migrations); ++index) {
         printf("INFO: %s: applying migration %zu\n", tore_path, index);
-        // TODO: put tracing of the migration queries behind an environment variable and enable it only in chroot
-        printf("%s\n", migrations[index]);
+        if (tore_trace_migration_queries) printf("%s\n", migrations[index]);
         if (sqlite3_exec(db, migrations[index], NULL, NULL, NULL) != SQLITE_OK) {
             LOG_SQLITE3_ERROR(db);
             return_defer(false);

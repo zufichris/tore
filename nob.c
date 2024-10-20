@@ -43,7 +43,7 @@ int main(int argc, char **argv)
         // NOTE: this command runs the developed tore in an isolated environment so it does not damage your "production" database file
 #ifdef __linux__ // NOTE: this is highly non-crossplatform approach (and that's why it's behind an ifdef)
         // TODO: bring local timezone to the chroot environment
-        nob_cmd_append(&cmd, "sudo", "HOME=/", "chroot", temp_sprintf("--userspec=%d", getuid()), BUILD_FOLDER, "/tore");
+        nob_cmd_append(&cmd, "sudo", "TORE_TRACE_MIGRATION_QUERIES=1", "HOME=/", "chroot", temp_sprintf("--userspec=%d", getuid()), BUILD_FOLDER, "/tore");
         da_append_many(&cmd, argv, argc);
         if (!nob_cmd_run_sync_and_reset(&cmd)) return 1;
 #else
