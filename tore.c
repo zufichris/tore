@@ -33,7 +33,7 @@ bool create_schema(sqlite3 *db, const char *tore_path)
 {
     bool result = true;
     sqlite3_stmt *stmt = NULL;
-    const char *sql = 
+    const char *sql =
         "CREATE TABLE IF NOT EXISTS Migrations (\n"
         "    applied_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,\n"
         "    query TEXT NOT NULL\n"
@@ -517,7 +517,7 @@ int main(int argc, char **argv)
 
         // TODO: Allow the scheduled_at to be things like "today", "tomorrow", etc
         // TODO: research if it's possible to enforce the date format on the level of sqlite3 contraints
-        const char *scheduled_at = shift(argv, argc); 
+        const char *scheduled_at = shift(argv, argc);
         if (!verify_date_format(scheduled_at)) {
             fprintf(stderr, "ERROR: %s is not a valid date format\n", scheduled_at);
             return_defer(1);
