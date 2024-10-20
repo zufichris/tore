@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <time.h>
 #include "sqlite3.h"
 
 #define NOB_IMPLEMENTATION
@@ -298,7 +299,52 @@ defer:
     return result;
 }
 
-bool create_new_reminder(sqlite3 *db, const char *title, const char *scheduled_at, const char *period)
+typedef enum {
+    PERIOD_NONE = -1,
+    PERIOD_DAY,
+    PERIOD_WEEK,
+    PERIOD_MONTH,
+    PERIOD_YEAR,
+    COUNT_PERIODS,
+} Period;
+
+typedef struct {
+    const char *modifier;
+    const char *name;
+} Period_Modifier;
+
+static_assert(COUNT_PERIODS == 4, "Amount of periods have changed");
+Period_Modifier tore_period_modifiers[COUNT_PERIODS] = {
+    [PERIOD_DAY]   = { .modifier = "d", .name = "days"   },
+    [PERIOD_WEEK]  = { .modifier = "w", .name = "weeks"  },
+    [PERIOD_MONTH] = { .modifier = "m", .name = "months" },
+    [PERIOD_YEAR]  = { .modifier = "y", .name = "years"  },
+};
+
+Period period_by_tore_modifier(const char *modifier)
+{
+    for (Period period = PERIOD_NONE; period < COUNT_PERIODS; ++period) {
+        if (strcmp(modifier, tore_period_modifiers[period].modifier) == 0) {
+            return period;
+        }
+    }
+    return PERIOD_NONE;
+}
+
+const char *render_period_as_sqlite3_datetime_modifier_temp(Period period, unsigned long period_length)
+{
+    switch (period) {
+    case PERIOD_NONE:  return NULL;
+    case PERIOD_DAY:   return temp_sprintf("+%lu days",   period_length);
+    case PERIOD_WEEK:  return temp_sprintf("+%lu days",   period_length*7);
+    case PERIOD_MONTH: return temp_sprintf("+%lu months", period_length);
+    case PERIOD_YEAR:  return temp_sprintf("+%lu years",  period_length);
+    case COUNT_PERIODS:
+    default: UNREACHABLE("render_period_as_sqlite3_datetime_modifier_temp");
+    }
+}
+
+bool create_new_reminder(sqlite3 *db, const char *title, const char *scheduled_at, Period period, unsigned long period_length)
 {
     bool result = true;
 
@@ -316,7 +362,8 @@ bool create_new_reminder(sqlite3 *db, const char *title, const char *scheduled_a
         LOG_SQLITE3_ERROR(db);
         return_defer(false);
     }
-    if (sqlite3_bind_text(stmt, 3, period, period ? strlen(period) : 0, NULL) != SQLITE_OK) {
+    const char *rendered_period = render_period_as_sqlite3_datetime_modifier_temp(period, period_length);
+    if (sqlite3_bind_text(stmt, 3, rendered_period, rendered_period ? strlen(rendered_period) : 0, NULL) != SQLITE_OK) {
         LOG_SQLITE3_ERROR(db);
         return_defer(false);
     }
@@ -447,6 +494,8 @@ int main(int argc, char **argv)
     int result = 0;
     sqlite3 *db = NULL;
 
+    srand(time(0));
+
     const char *program_name = shift(argv, argc);
 
     const char *command_name= "checkout";
@@ -538,11 +587,34 @@ int main(int argc, char **argv)
             return_defer(1);
         }
 
-        // TODO: verify the format of period during parsing of the CLI arguments
-        const char *period = NULL;
-        if (argc > 0) period = shift(argv, argc);
+        Period period = PERIOD_NONE;
+        unsigned long period_length = 0;
+        if (argc > 0) {
+            const char *unparsed_period = shift(argv, argc);
+            char *endptr = NULL;
+            period_length = strtoul(unparsed_period, &endptr, 10);
+            if (endptr == unparsed_period) {
+                fprintf(stderr, "ERROR: Invalid period `%s`. Expected something like\n", unparsed_period);
+                for (Period p = 0; p < COUNT_PERIODS; ++p) {
+                    Period_Modifier *pm = &tore_period_modifiers[p];
+                    size_t l = rand()%9 + 1;
+                    fprintf(stderr, "    %lu%s - means every %lu %s\n", l, pm->modifier, l, pm->name);
+                }
+                return_defer(1);
+            }
+            unparsed_period = endptr;
+            period = period_by_tore_modifier(unparsed_period);
+            if (period == PERIOD_NONE) {
+                fprintf(stderr, "ERROR: Unknown period modifier `%s`. Expected modifiers are\n", unparsed_period);
+                for (Period p = 0; p < COUNT_PERIODS; ++p) {
+                    Period_Modifier *pm = &tore_period_modifiers[p];
+                    fprintf(stderr, "    %lu%s  - means every %lu %s\n", period_length, pm->modifier, period_length, pm->name);
+                }
+                return_defer(1);
+            }
+        }
 
-        if (!create_new_reminder(db, title, scheduled_at, period)) return_defer(1);
+        if (!create_new_reminder(db, title, scheduled_at, period, period_length)) return_defer(1);
         if (!show_active_reminders(db)) return_defer(1);
         return_defer(0);
     }
