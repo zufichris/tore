@@ -263,6 +263,7 @@ typedef struct {
     size_t capacity;
 } Reminders;
 
+// TODO: sort reminders by how close they are to today's date
 bool load_active_reminders(sqlite3 *db, Reminders *reminders)
 {
     bool result = true;
