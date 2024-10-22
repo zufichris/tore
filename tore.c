@@ -520,6 +520,8 @@ int main(int argc, char **argv)
 
     if (!create_schema(db, tore_path)) return_defer(1);
 
+    // TODO: `undo` command
+
     if (strcmp(command_name, "checkout") == 0) {
         if (!fire_off_reminders(db)) return_defer(1);
         if (!show_active_notifications(db)) return_defer(1);
