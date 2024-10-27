@@ -24,6 +24,16 @@ bool build_sqlite3(Nob_Cmd *cmd)
     return true;
 }
 
+bool set_environment_variable(const char *name, const char *value)
+{
+    nob_log(INFO, "SETENV: %s = %s", name, value);
+    if (setenv(name, value, 1) < 0) {
+        nob_log(ERROR, "Could not set variable %s: %s", name, strerror(errno));
+        return false;
+    }
+    return true;
+}
+
 int main(int argc, char **argv)
 {
     NOB_GO_REBUILD_URSELF(argc, argv);
@@ -50,14 +60,8 @@ int main(int argc, char **argv)
         // be renamed to something else in the future.
         const char *current_dir = get_current_dir_temp();
         if (current_dir == NULL) return 1;
-        if (setenv("HOME", temp_sprintf("%s/"BUILD_FOLDER, current_dir), 1) < 0) {
-            nob_log(ERROR, "Could not set variable HOME: %s", strerror(errno));
-            return 1;
-        }
-        if (setenv("TORE_TRACE_MIGRATION_QUERIES", "1", 1) < 0) {
-            nob_log(ERROR, "Could not set variable TORE_TRACE_MIGRATION_QUERIES: %s", strerror(errno));
-            return 1;
-        }
+        if (!set_environment_variable("HOME", temp_sprintf("%s/"BUILD_FOLDER, current_dir))) return 1;
+        if (!set_environment_variable("TORE_TRACE_MIGRATION_QUERIES", "1")) return 1;
         nob_cmd_append(&cmd, BUILD_FOLDER"tore");
         da_append_many(&cmd, argv, argc);
         if (!nob_cmd_run_sync_and_reset(&cmd)) return 1;

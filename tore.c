@@ -263,14 +263,13 @@ typedef struct {
     size_t capacity;
 } Reminders;
 
-// TODO: sort reminders by how close they are to today's date
 bool load_active_reminders(sqlite3 *db, Reminders *reminders)
 {
     bool result = true;
 
     sqlite3_stmt *stmt = NULL;
 
-    int ret = sqlite3_prepare_v2(db, "SELECT id, title, scheduled_at, period FROM Reminders WHERE finished_at IS NULL", -1, &stmt, NULL);
+    int ret = sqlite3_prepare_v2(db, "SELECT id, title, scheduled_at, period FROM Reminders WHERE finished_at IS NULL ORDER BY scheduled_at DESC", -1, &stmt, NULL);
     if (ret != SQLITE_OK) {
         LOG_SQLITE3_ERROR(db);
         return_defer(false);
@@ -417,6 +416,7 @@ bool show_active_reminders(sqlite3 *db)
 
     Reminders reminders = {0};
 
+    // TODO: show in how many days the reminder fires off
     if (!load_active_reminders(db, &reminders)) return_defer(false);
     for (size_t i = 0; i < reminders.count; ++i) {
         Reminder *it = &reminders.items[i];
@@ -568,6 +568,8 @@ int main(int argc, char **argv)
         if (!show_active_reminders(db)) return_defer(1);
         return_defer(0);
     }
+
+    // TODO: calendar output with the reminders
 
     if (strcmp(command_name, "remind") == 0) {
         if (argc <= 0) {
