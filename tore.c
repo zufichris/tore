@@ -630,6 +630,8 @@ int main(int argc, char **argv)
         return_defer(0);
     }
 
+    // TODO: some way to turn Notification into a Reminder
+
     fprintf(stderr, "ERROR: unknown command %s\n", command_name);
     return_defer(1);
 
