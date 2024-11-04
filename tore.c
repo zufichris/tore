@@ -494,6 +494,7 @@ int main(int argc, char **argv)
 {
     int result = 0;
     sqlite3 *db = NULL;
+    String_Builder sb = {0};
 
     srand(time(0));
 
@@ -545,12 +546,17 @@ int main(int argc, char **argv)
 
     if (strcmp(command_name, "notify") == 0) {
         if (argc <= 0) {
-            fprintf(stderr, "Usage: %s notify <title>\n", program_name);
+            fprintf(stderr, "Usage: %s notify <title...>\n", program_name);
             fprintf(stderr, "ERROR: expected title\n");
             return_defer(1);
         }
 
-        const char *title = shift(argv, argc);
+        for (bool pad = false; argc > 0; pad = true) {
+            if (pad) sb_append_cstr(&sb, " ");
+            sb_append_cstr(&sb, shift(argv, argc));
+        }
+        sb_append_null(&sb);
+        const char *title = sb.items;
 
         if (!create_notification_with_title(db, title)) return_defer(1);
         if (!show_active_notifications(db)) return_defer(1);
@@ -629,5 +635,6 @@ int main(int argc, char **argv)
 
 defer:
     if (db) sqlite3_close(db);
+    free(sb.items);
     return result;
 }
