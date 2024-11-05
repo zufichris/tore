@@ -7,6 +7,7 @@
 #endif // __linux__
 
 #define BUILD_FOLDER "./build/"
+#define GIT_HASH_FILE BUILD_FOLDER "git-hash.txt"
 
 bool build_sqlite3(Nob_Cmd *cmd)
 {
@@ -34,6 +35,23 @@ bool set_environment_variable(const char *name, const char *value)
     return true;
 }
 
+char *get_git_hash(Cmd *cmd)
+{
+    char *result = NULL;
+    String_Builder sb = {0};
+    Fd fdout = fd_open_for_write(GIT_HASH_FILE);
+    if (fdout == INVALID_FD) return_defer(NULL);
+    cmd_append(cmd, "git", "rev-parse", "HEAD");
+    if (!cmd_run_sync_redirect_and_reset(cmd, (Nob_Cmd_Redirect) { .fdout = &fdout })) return_defer(NULL);
+    if (!read_entire_file(GIT_HASH_FILE, &sb)) return_defer(NULL);
+    while (sb.count > 0 && isspace(sb.items[--sb.count]));
+    sb_append_null(&sb);
+    return_defer(sb.items);
+defer:
+    if (result == NULL) free(sb.items);
+    return result;
+}
+
 int main(int argc, char **argv)
 {
     NOB_GO_REBUILD_URSELF(argc, argv);
@@ -43,9 +61,18 @@ int main(int argc, char **argv)
 
     if (!nob_mkdir_if_not_exists(BUILD_FOLDER)) return 1;
     if (!build_sqlite3(&cmd)) return 1;
-    nob_cmd_append(&cmd, "cc", "-Wall", "-Wextra", "-Wswitch-enum", "-ggdb", "-static", "-I./sqlite-amalgamation-3460100/", "-o", BUILD_FOLDER"tore", "tore.c", BUILD_FOLDER"sqlite3.o");
+
+    char *git_hash = get_git_hash(&cmd);
+
+    cmd_append(&cmd, "cc");
+    if (git_hash) {
+        cmd_append(&cmd, temp_sprintf("-DGIT_HASH=\"%s\"", git_hash));
+        free(git_hash);
+    } else {
+        cmd_append(&cmd, temp_sprintf("-DGIT_HASH=\"Unknown\""));
+    }
+    cmd_append(&cmd, "-Wall", "-Wextra", "-Wswitch-enum", "-ggdb", "-static", "-I./sqlite-amalgamation-3460100/", "-o", BUILD_FOLDER"tore", "tore.c", BUILD_FOLDER"sqlite3.o");
     if (!nob_cmd_run_sync_and_reset(&cmd)) return 1;
-    // TODO: bake git hash into executable
 
     if (argc <= 0) return 0;
     const char *command_name = shift(argv, argc);

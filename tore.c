@@ -505,6 +505,11 @@ int main(int argc, char **argv)
 
     // TODO: implement `help` command
 
+    if (strcmp(command_name, "version") == 0) {
+        fprintf(stderr, "GIT HASH: "GIT_HASH"\n");
+        return 0;
+    }
+
     const char *home_path = getenv("HOME");
     if (home_path == NULL) {
         fprintf(stderr, "ERROR: No $HOME environment variable is setup. We need it to find the location of ~/"TORE_FILENAME" database.\n");
