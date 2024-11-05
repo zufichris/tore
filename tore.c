@@ -531,6 +531,7 @@ int main(int argc, char **argv)
         return_defer(0);
     }
 
+    // TODO: dismiss should accept several indices
     if (strcmp(command_name, "dismiss") == 0) {
         if (argc <= 0) {
             fprintf(stderr, "Usage: %s dismiss <id>\n", program_name);
