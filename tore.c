@@ -175,6 +175,20 @@ bool show_active_notifications(sqlite3 *db)
     Notifications notifs = {0};
     if (!load_active_notifications(db, &notifs)) return_defer(false);
 
+    // TODO: Visually group together non-dimissed Notifications that were created by the same Reminder
+    //   This very likely to happen with daily reminders. You may forget to finish it one day and it fires off the next
+    //   day piling up your Notifications box. Grouping them up seems to be difficult purely in SQL, so just do it here
+    //   in C.
+    // TODO: Consider using UUIDs for identifying Notifications and Reminders
+    //   Read something like https://www.cockroachlabs.com/blog/what-is-a-uuid/ for UUIDs in DBs 101
+    //   (There are lots of articles like these online, just google the topic up).
+    //   This is related to visually grouping non-dismissed Notifications created by the same Reminders purely in SQL.
+    //   Doing it straightforwardly would be something like
+    //   ```sql
+    //   SELECT id, title, datetime(created_at, 'localtime') FROM Notifications WHERE dismissed_at IS NULL GROUP BY ifnull(reminder_id, id)
+    //   ```
+    //   but you may run into problems if reminder_id and id collide. Using UUIDs for all the rows of all the tables solves this.
+
     for (size_t i = 0; i < notifs.count; ++i) {
         printf("%zu: %s (%s)\n", i, notifs.items[i].title, notifs.items[i].created_at);
     }
