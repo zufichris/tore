@@ -643,6 +643,7 @@ int main(int argc, char **argv)
             close(client_fd);
 
             notifs.count = 0;
+            reminders.count = 0;
             body.count = 0;
             response.count = 0;
             temp_reset();
