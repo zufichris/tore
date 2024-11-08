@@ -62,8 +62,18 @@ int main(int argc, char **argv)
     if (!nob_mkdir_if_not_exists(BUILD_FOLDER)) return 1;
     if (!build_sqlite3(&cmd)) return 1;
 
-    char *git_hash = get_git_hash(&cmd);
+    // Templates
+    cmd_append(&cmd, "cc", "-Wall", "-Wextra", "-Wswitch-enum", "-ggdb", "-o", BUILD_FOLDER"tt", "tt.c");
+    if (!cmd_run_sync_and_reset(&cmd)) return 1;
 
+    Fd index_fd = fd_open_for_write(BUILD_FOLDER"index.h");
+    if (index_fd == INVALID_FD) return 1;
+    cmd_append(&cmd, BUILD_FOLDER"tt", "./index.h.tt");
+    if (!cmd_run_sync_redirect_and_reset(&cmd, (Nob_Cmd_Redirect) {
+        .fdout = &index_fd,
+    })) return 1;
+
+    char *git_hash = get_git_hash(&cmd);
     cmd_append(&cmd, "cc");
     if (git_hash) {
         cmd_append(&cmd, temp_sprintf("-DGIT_HASH=\"%s\"", git_hash));
@@ -71,7 +81,8 @@ int main(int argc, char **argv)
     } else {
         cmd_append(&cmd, temp_sprintf("-DGIT_HASH=\"Unknown\""));
     }
-    cmd_append(&cmd, "-Wall", "-Wextra", "-Wswitch-enum", "-ggdb", "-static", "-I./sqlite-amalgamation-3460100/", "-o", BUILD_FOLDER"tore", "tore.c", BUILD_FOLDER"sqlite3.o");
+    cmd_append(&cmd, "-Wall", "-Wextra", "-Wswitch-enum", "-ggdb", "-static", "-I./sqlite-amalgamation-3460100/", "-I./build/", "-o", BUILD_FOLDER"tore", "tore.c", BUILD_FOLDER"sqlite3.o");
+
     if (!nob_cmd_run_sync_and_reset(&cmd)) return 1;
 
     if (argc <= 0) return 0;

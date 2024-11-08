@@ -3,6 +3,10 @@
 #include <time.h>
 #include "sqlite3.h"
 
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+
 #define NOB_IMPLEMENTATION
 #define NOB_STRIP_PREFIX
 #include "nob.h"
@@ -504,6 +508,16 @@ bool verify_date_format(const char *date)
     return !(*format || *date);
 }
 
+void render_index(String_Builder *sb, Notifications notifs, Reminders reminders)
+{
+#define OUT(buf, size) sb_append_buf(sb, buf, size)
+// TODO: ESCAPED_OUT does not actually escape anything
+#define ESCAPED_OUT OUT
+#include "index.h"
+#undef OUT
+#undef ESCAPED_OUT
+}
+
 int main(int argc, char **argv)
 {
     int result = 0;
@@ -562,6 +576,82 @@ int main(int argc, char **argv)
         if (!dismiss_notification_by_index(db, index)) return_defer(1);
         if (!show_active_notifications(db)) return_defer(1);
         return_defer(0);
+    }
+
+    if (strcmp(command_name, "serve") == 0) {
+        const char *addr = "127.0.0.1";
+        uint16_t port = 6969;
+
+        int server_fd = socket(AF_INET, SOCK_STREAM, 0);
+        if (server_fd < 0) {
+            fprintf(stderr, "ERROR: Could not create socket epicly: %s\n", strerror(errno));
+            return_defer(1);
+        }
+
+        int option = 1;
+        setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &option, sizeof(option));
+
+        struct sockaddr_in server_addr;
+        memset(&server_addr, 0, sizeof(server_addr));
+        server_addr.sin_family = AF_INET;
+        server_addr.sin_port = htons(port);
+        server_addr.sin_addr.s_addr = inet_addr(addr);
+
+        ssize_t err = bind(server_fd, (struct sockaddr*) &server_addr, sizeof(server_addr));
+        if (err != 0) {
+            fprintf(stderr, "ERROR: Could not bind socket epicly: %s\n", strerror(errno));
+            return_defer(1);
+        }
+
+        err = listen(server_fd, 69);
+        if (err != 0) {
+            fprintf(stderr, "ERRO: Could not listen to socket, it's too quiet: %s\n", strerror(errno));
+            return_defer(1);
+        }
+
+        printf("Listening to http://%s:%d/\n", addr, port);
+
+        Notifications notifs = {0};
+        Reminders reminders = {0};
+        String_Builder response = {0};
+        String_Builder body = {0};
+        for (;;) {
+            struct sockaddr_in client_addr;
+            socklen_t client_addrlen = 0;
+            int client_fd = accept(server_fd, (struct sockaddr*)&client_addr, &client_addrlen);
+            if (client_fd < 0) {
+                fprintf(stderr, "ERROR: Could not accept connection. This is unacceptable! %s\n", strerror(errno));
+                return_defer(1);
+            }
+
+            if (!load_active_notifications(db, &notifs)) return_defer(false);
+            if (!load_active_reminders(db, &reminders)) return_defer(false);
+            render_index(&body, notifs, reminders);
+
+            sb_append_cstr(&response, "HTTP/1.0 200\r\n");
+            sb_append_cstr(&response, "Content-Type: text/html\r\n");
+            sb_append_cstr(&response, temp_sprintf("Content-Length: %zu\r\n", body.count));
+            sb_append_cstr(&response, "Connection: close\r\n");
+            sb_append_cstr(&response, "\r\n");
+            sb_append_buf(&response, body.items, body.count);
+
+            if (write(client_fd, response.items, response.count) < 0) {
+                fprintf(stderr, "ERROR: Could not write response: %s\n", strerror(errno));
+                return_defer(1);
+            }
+
+            close(client_fd);
+
+            notifs.count = 0;
+            body.count = 0;
+            response.count = 0;
+            temp_reset();
+        }
+
+        // TODO: The only way to stop the server is by SIGINT, but that probably doesn't close the db correctly.
+        // So we probably should add a SIGINT handler specifically for this.
+
+        UNREACHABLE("serve");
     }
 
     if (strcmp(command_name, "notify") == 0) {
