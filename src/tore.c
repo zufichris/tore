@@ -546,13 +546,12 @@ void sb_append_html_escaped_buf(String_Builder *sb, const char *buf, size_t size
     }
 }
 
-void render_index(String_Builder *sb, Collapsed_Notifications notifs, Reminders reminders)
+void render_index_page(String_Builder *sb, Collapsed_Notifications notifs, Reminders reminders)
 {
 #define OUT(buf, size) sb_append_buf(sb, buf, size)
 #define ESCAPED_OUT(buf, size) sb_append_html_escaped_buf(sb, buf, size)
 #define INT(x) sb_append_cstr(sb, temp_sprintf("%d", (x)))
-// TODO: the name of the compiled template is too vague and is not immediately apparent what it is
-#include "index.h"
+#include "index_page.h"
 #undef INT
 #undef OUT
 #undef ESCAPED_OUT
@@ -667,7 +666,7 @@ int main(int argc, char **argv)
 
             if (!load_active_collapsed_notifications(db, &notifs)) return_defer(false);
             if (!load_active_reminders(db, &reminders)) return_defer(false);
-            render_index(&body, notifs, reminders);
+            render_index_page(&body, notifs, reminders);
 
             sb_append_cstr(&response, "HTTP/1.0 200\r\n");
             sb_append_cstr(&response, "Content-Type: text/html\r\n");

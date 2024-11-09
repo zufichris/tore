@@ -70,9 +70,9 @@ int main(int argc, char **argv)
     cmd_append(&cmd, "cc", "-Wall", "-Wextra", "-Wswitch-enum", "-ggdb", "-I.", "-o", BUILD_FOLDER"tt", SRC_FOLDER"tt.c");
     if (!cmd_run_sync_and_reset(&cmd)) return 1;
 
-    Fd index_fd = fd_open_for_write(BUILD_FOLDER"index.h");
+    Fd index_fd = fd_open_for_write(BUILD_FOLDER"index_page.h");
     if (index_fd == INVALID_FD) return 1;
-    cmd_append(&cmd, BUILD_FOLDER"tt", SRC_FOLDER"index.h.tt");
+    cmd_append(&cmd, BUILD_FOLDER"tt", SRC_FOLDER"index_page.h.tt");
     if (!cmd_run_sync_redirect_and_reset(&cmd, (Nob_Cmd_Redirect) {
         .fdout = &index_fd,
     })) return 1;
