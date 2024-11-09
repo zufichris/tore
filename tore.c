@@ -635,9 +635,15 @@ int main(int argc, char **argv)
             sb_append_cstr(&response, "\r\n");
             sb_append_buf(&response, body.items, body.count);
 
-            if (write(client_fd, response.items, response.count) < 0) {
-                fprintf(stderr, "ERROR: Could not write response: %s\n", strerror(errno));
-                return_defer(1);
+            String_View untransfered = sb_to_sv(response);
+            while (untransfered.count > 0) {
+                ssize_t transfered = write(client_fd, untransfered.data, untransfered.count);
+                if (transfered < 0) {
+                    fprintf(stderr, "ERROR: Could not write response: %s\n", strerror(errno));
+                    break;
+                }
+                untransfered.data += transfered;
+                untransfered.count -= transfered;
             }
 
             close(client_fd);
