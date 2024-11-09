@@ -129,35 +129,51 @@ typedef struct {
     int id;
     const char *title;
     const char *created_at;
-} Notification;
+    int reminder_id;
+    // NOTE: count > 1 means that reminder_id >= 0 and in the database there are several active notifications created by the same Reminder.
+    // So this means all those (basically the same) Notifications got collapsed into a single one for convenient displaying.
+    // id refers to whatever Notification Sqlite3 decides after the GROUP BY (usually the first one).
+    int count;
+} Collapsed_Notification;
 
 typedef struct {
-    Notification *items;
+    Collapsed_Notification *items;
     size_t count;
     size_t capacity;
-} Notifications;
+} Collapsed_Notifications;
 
-bool load_active_notifications(sqlite3 *db, Notifications *notifs)
+bool load_active_collapsed_notifications(sqlite3 *db, Collapsed_Notifications *notifs)
 {
     bool result = true;
     sqlite3_stmt *stmt = NULL;
 
-    int ret = sqlite3_prepare_v2(db, "SELECT id, title, datetime(created_at, 'localtime') FROM Notifications WHERE dismissed_at IS NULL", -1, &stmt, NULL);
+    int ret = sqlite3_prepare_v2(db,
+        "SELECT id, title, datetime(created_at, 'localtime') as ts, reminder_id, count(*) "
+        "FROM Notifications "
+        "WHERE dismissed_at IS NULL "
+        "GROUP BY ifnull(reminder_id, -id) "
+        "ORDER BY ts;",
+        -1, &stmt, NULL);
     if (ret != SQLITE_OK) {
         LOG_SQLITE3_ERROR(db);
         return_defer(false);
     }
 
     ret = sqlite3_step(stmt);
-    for (int index = 0; ret == SQLITE_ROW; ++index) {
-        int id = sqlite3_column_int(stmt, 0);
-        // TODO: maybe put all of these things into their own arena
-        const char *title = strdup((const char *)sqlite3_column_text(stmt, 1));
-        const char *created_at = strdup((const char *)sqlite3_column_text(stmt, 2));
-        da_append(notifs, ((Notification) {
+    for (int row = 0; ret == SQLITE_ROW; ++row) {
+        int column = 0;
+        int id = sqlite3_column_int(stmt, column++);
+        // TODO: maybe put all of these dupped strings into their own arena
+        const char *title = strdup((const char *)sqlite3_column_text(stmt, column++));
+        const char *created_at = strdup((const char *)sqlite3_column_text(stmt, column++));
+        int reminder_id = sqlite3_column_int(stmt, column++);
+        int count = sqlite3_column_int(stmt, column++);
+        da_append(notifs, ((Collapsed_Notification) {
             .id = id,
             .title = title,
             .created_at = created_at,
+            .reminder_id = reminder_id,
+            .count = count,
         }));
         ret = sqlite3_step(stmt);
     }
@@ -176,13 +192,9 @@ bool show_active_notifications(sqlite3 *db)
 {
     bool result = true;
 
-    Notifications notifs = {0};
-    if (!load_active_notifications(db, &notifs)) return_defer(false);
+    Collapsed_Notifications notifs = {0};
+    if (!load_active_collapsed_notifications(db, &notifs)) return_defer(false);
 
-    // TODO: Visually group together non-dimissed Notifications that were created by the same Reminder
-    //   This very likely to happen with daily reminders. You may forget to finish it one day and it fires off the next
-    //   day piling up your Notifications box. Grouping them up seems to be difficult purely in SQL, so just do it here
-    //   in C.
     // TODO: Consider using UUIDs for identifying Notifications and Reminders
     //   Read something like https://www.cockroachlabs.com/blog/what-is-a-uuid/ for UUIDs in DBs 101
     //   (There are lots of articles like these online, just google the topic up).
@@ -192,9 +204,20 @@ bool show_active_notifications(sqlite3 *db)
     //   SELECT id, title, datetime(created_at, 'localtime') FROM Notifications WHERE dismissed_at IS NULL GROUP BY ifnull(reminder_id, id)
     //   ```
     //   but you may run into problems if reminder_id and id collide. Using UUIDs for all the rows of all the tables solves this.
+    //   Right now it is solved by making the row id negative.
+    //   ```sql
+    //   SELECT id, title, datetime(created_at, 'localtime') FROM Notifications WHERE dismissed_at IS NULL GROUP BY ifnull(reminder_id, -id)
+    //   ```
+    //   Which is a working solution, but all the other problems UUIDs address remain.
 
     for (size_t i = 0; i < notifs.count; ++i) {
-        printf("%zu: %s (%s)\n", i, notifs.items[i].title, notifs.items[i].created_at);
+        Collapsed_Notification *it = &notifs.items[i];
+        assert(it->count >= 0);
+        if (it->count == 1) {
+            printf("%zu: %s (%s)\n", i, it->title, it->created_at);
+        } else {
+            printf("%zu: [%d] %s (%s)\n", i, it->count, it->title, it->created_at);
+        }
     }
 
 defer:
@@ -232,8 +255,8 @@ bool dismiss_notification_by_index(sqlite3 *db, int index)
 {
     bool result = true;
 
-    Notifications notifs = {0};
-    if (!load_active_notifications(db, &notifs)) return_defer(false);
+    Collapsed_Notifications notifs = {0};
+    if (!load_active_collapsed_notifications(db, &notifs)) return_defer(false);
     if (!(0 <= index && (size_t)index < notifs.count)) {
         fprintf(stderr, "ERROR: %d is not a valid index of an active notification\n", index);
         return_defer(false);
@@ -508,13 +531,15 @@ bool verify_date_format(const char *date)
     return !(*format || *date);
 }
 
-void render_index(String_Builder *sb, Notifications notifs, Reminders reminders)
+void render_index(String_Builder *sb, Collapsed_Notifications notifs, Reminders reminders)
 {
 #define OUT(buf, size) sb_append_buf(sb, buf, size)
 // TODO: ESCAPED_OUT does not actually escape anything
 #define ESCAPED_OUT OUT
 // TODO: the name of the compiled template is too vague and is not immediately apparent what it is
+#define INT(x) sb_append_cstr(sb, temp_sprintf("%d", (x)))
 #include "index.h"
+#undef INT
 #undef OUT
 #undef ESCAPED_OUT
 }
@@ -612,7 +637,7 @@ int main(int argc, char **argv)
 
         printf("Listening to http://%s:%d/\n", addr, port);
 
-        Notifications notifs = {0};
+        Collapsed_Notifications notifs = {0};
         Reminders reminders = {0};
         String_Builder response = {0};
         String_Builder body = {0};
@@ -626,7 +651,7 @@ int main(int argc, char **argv)
                 return_defer(1);
             }
 
-            if (!load_active_notifications(db, &notifs)) return_defer(false);
+            if (!load_active_collapsed_notifications(db, &notifs)) return_defer(false);
             if (!load_active_reminders(db, &reminders)) return_defer(false);
             render_index(&body, notifs, reminders);
 
