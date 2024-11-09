@@ -531,13 +531,27 @@ bool verify_date_format(const char *date)
     return !(*format || *date);
 }
 
+// Taken from https://stackoverflow.com/a/7382028
+void sb_append_html_escaped_buf(String_Builder *sb, const char *buf, size_t size)
+{
+    for (size_t i = 0; i < size; ++i) {
+        switch (buf[i]) {
+            case '&':  sb_append_cstr(sb, "&amp;");  break;
+            case '<':  sb_append_cstr(sb, "&lt;");   break;
+            case '>':  sb_append_cstr(sb, "&gt;");   break;
+            case '"':  sb_append_cstr(sb, "&quot;"); break;
+            case '\'': sb_append_cstr(sb, "&#39;");  break;
+            default:   da_append(sb, buf[i]);
+        }
+    }
+}
+
 void render_index(String_Builder *sb, Collapsed_Notifications notifs, Reminders reminders)
 {
 #define OUT(buf, size) sb_append_buf(sb, buf, size)
-// TODO: ESCAPED_OUT does not actually escape anything
-#define ESCAPED_OUT OUT
-// TODO: the name of the compiled template is too vague and is not immediately apparent what it is
+#define ESCAPED_OUT(buf, size) sb_append_html_escaped_buf(sb, buf, size)
 #define INT(x) sb_append_cstr(sb, temp_sprintf("%d", (x)))
+// TODO: the name of the compiled template is too vague and is not immediately apparent what it is
 #include "index.h"
 #undef INT
 #undef OUT
