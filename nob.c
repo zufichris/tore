@@ -6,13 +6,15 @@
 #include <unistd.h>
 #endif // __linux__
 
+// Folder must end with forward slash /
 #define BUILD_FOLDER "./build/"
-#define GIT_HASH_FILE BUILD_FOLDER "git-hash.txt"
+#define SRC_FOLDER "./src/"
+#define GIT_HASH_FILE BUILD_FOLDER"git-hash.txt"
 
 bool build_sqlite3(Nob_Cmd *cmd)
 {
     const char *output_path = BUILD_FOLDER"sqlite3.o";
-    const char *input_path = "sqlite-amalgamation-3460100/sqlite3.c";
+    const char *input_path = SRC_FOLDER"sqlite-amalgamation-3460100/sqlite3.c";
     int rebuild_is_needed = nob_needs_rebuild1(output_path, input_path);
     if (rebuild_is_needed < 0) return false;
     if (rebuild_is_needed) {
@@ -42,7 +44,9 @@ char *get_git_hash(Cmd *cmd)
     Fd fdout = fd_open_for_write(GIT_HASH_FILE);
     if (fdout == INVALID_FD) return_defer(NULL);
     cmd_append(cmd, "git", "rev-parse", "HEAD");
-    if (!cmd_run_sync_redirect_and_reset(cmd, (Nob_Cmd_Redirect) { .fdout = &fdout })) return_defer(NULL);
+    if (!cmd_run_sync_redirect_and_reset(cmd, (Nob_Cmd_Redirect) { 
+        .fdout = &fdout 
+    })) return_defer(NULL);
     if (!read_entire_file(GIT_HASH_FILE, &sb)) return_defer(NULL);
     while (sb.count > 0 && isspace(sb.items[--sb.count]));
     sb_append_null(&sb);
@@ -63,12 +67,12 @@ int main(int argc, char **argv)
     if (!build_sqlite3(&cmd)) return 1;
 
     // Templates
-    cmd_append(&cmd, "cc", "-Wall", "-Wextra", "-Wswitch-enum", "-ggdb", "-o", BUILD_FOLDER"tt", "tt.c");
+    cmd_append(&cmd, "cc", "-Wall", "-Wextra", "-Wswitch-enum", "-ggdb", "-I.", "-o", BUILD_FOLDER"tt", SRC_FOLDER"tt.c");
     if (!cmd_run_sync_and_reset(&cmd)) return 1;
 
     Fd index_fd = fd_open_for_write(BUILD_FOLDER"index.h");
     if (index_fd == INVALID_FD) return 1;
-    cmd_append(&cmd, BUILD_FOLDER"tt", "./index.h.tt");
+    cmd_append(&cmd, BUILD_FOLDER"tt", SRC_FOLDER"index.h.tt");
     if (!cmd_run_sync_redirect_and_reset(&cmd, (Nob_Cmd_Redirect) {
         .fdout = &index_fd,
     })) return 1;
@@ -81,7 +85,7 @@ int main(int argc, char **argv)
     } else {
         cmd_append(&cmd, temp_sprintf("-DGIT_HASH=\"Unknown\""));
     }
-    cmd_append(&cmd, "-Wall", "-Wextra", "-Wswitch-enum", "-ggdb", "-static", "-I./sqlite-amalgamation-3460100/", "-I./build/", "-o", BUILD_FOLDER"tore", "tore.c", BUILD_FOLDER"sqlite3.o");
+    cmd_append(&cmd, "-Wall", "-Wextra", "-Wswitch-enum", "-ggdb", "-static", "-I.", "-I"SRC_FOLDER"sqlite-amalgamation-3460100/", "-I"BUILD_FOLDER, "-o", BUILD_FOLDER"tore", SRC_FOLDER"tore.c", BUILD_FOLDER"sqlite3.o");
 
     if (!nob_cmd_run_sync_and_reset(&cmd)) return 1;
 
