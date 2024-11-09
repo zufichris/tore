@@ -7,14 +7,22 @@
     <h1>Tore</h1>
     <h2>Notifications:</h2>
     <ul>
-    %for (size_t i = 0; i < notifs.count; ++i) {%
-      <li>%ESCAPED_OUT(notifs.items[i].title, strlen(notifs.items[i].title));%</li>
+    %if (notifs.count > 0) {%
+        %for (size_t i = 0; i < notifs.count; ++i) {%
+          <li>%ESCAPED_OUT(notifs.items[i].title, strlen(notifs.items[i].title));%</li>
+        %}%
+    %} else {%
+        <p>No notifications</p>
     %}%
     </ul>
     <h2>Reminders:</h2>
     <ul>
-    %for (size_t i = 0; i < reminders.count; ++i) {%
-      <li>%ESCAPED_OUT(reminders.items[i].title, strlen(reminders.items[i].title));%</li>
+    %if (reminders.count > 0) {%
+        %for (size_t i = 0; i < reminders.count; ++i) {%
+          <li>%ESCAPED_OUT(reminders.items[i].title, strlen(reminders.items[i].title));%</li>
+        %}%
+    %} else {%
+        <p>No reminders</p>
     %}%
     </ul>
   </body>
