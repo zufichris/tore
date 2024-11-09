@@ -759,3 +759,7 @@ defer:
     free(sb.items);
     return result;
 }
+
+// TODO: start using Sqlite3 Transactions
+// - Wrap each command into a transaction
+// - Wrap each `serve` request into a transaction
