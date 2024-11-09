@@ -603,11 +603,12 @@ int main(int argc, char **argv)
         return_defer(0);
     }
 
-    // TODO: dismiss should accept several indices
+    // TODO: maybe `dismiss` should dismiss the entire group of Collapsed Notifications?
+    // TODO: `dismiss` should accept several indices
     if (strcmp(command_name, "dismiss") == 0) {
         if (argc <= 0) {
-            fprintf(stderr, "Usage: %s dismiss <id>\n", program_name);
-            fprintf(stderr, "ERROR: expected id\n");
+            fprintf(stderr, "Usage: %s dismiss <index>\n", program_name);
+            fprintf(stderr, "ERROR: expected index\n");
             return_defer(1);
         }
 
@@ -732,8 +733,6 @@ int main(int argc, char **argv)
         return_defer(0);
     }
 
-    // TODO: calendar output with the reminders
-
     if (strcmp(command_name, "remind") == 0) {
         if (argc <= 0) {
             if (!show_active_reminders(db)) return_defer(1);
@@ -801,3 +800,4 @@ defer:
 // TODO: start using Sqlite3 Transactions
 // - Wrap each command into a transaction
 // - Wrap each `serve` request into a transaction
+// TODO: calendar output with the reminders
