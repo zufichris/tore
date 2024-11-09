@@ -513,6 +513,7 @@ void render_index(String_Builder *sb, Notifications notifs, Reminders reminders)
 #define OUT(buf, size) sb_append_buf(sb, buf, size)
 // TODO: ESCAPED_OUT does not actually escape anything
 #define ESCAPED_OUT OUT
+// TODO: the name of the compiled template is too vague and is not immediately apparent what it is
 #include "index.h"
 #undef OUT
 #undef ESCAPED_OUT
@@ -616,6 +617,7 @@ int main(int argc, char **argv)
         String_Builder response = {0};
         String_Builder body = {0};
         for (;;) {
+            // TODO: log queries
             struct sockaddr_in client_addr;
             socklen_t client_addrlen = 0;
             int client_fd = accept(server_fd, (struct sockaddr*)&client_addr, &client_addrlen);

@@ -31,6 +31,9 @@ int main(int argc, char *argv[])
     if (!nob_read_entire_file(filepath, &sb)) return 1;
     String_View temp = sb_to_sv(sb);
     int c_code_mode = 0;
+    // TODO: Generate line control preprocessor directives
+    // - GCC: https://gcc.gnu.org/onlinedocs/cpp/Line-Control.html
+    // - MSVC: https://learn.microsoft.com/en-us/cpp/preprocessor/hash-line-directive-c-cpp
     while (temp.count) {
         String_View token = sv_chop_by_delim(&temp, '%');
         if (c_code_mode) {
