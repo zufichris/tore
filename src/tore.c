@@ -130,19 +130,17 @@ typedef struct {
     const char *title;
     const char *created_at;
     int reminder_id;
-    // NOTE: count > 1 means that reminder_id >= 0 and in the database there are several active notifications created by the same Reminder.
-    // So this means all those (basically the same) Notifications got collapsed into a single one for convenient displaying.
-    // id refers to whatever Notification Sqlite3 decides after the GROUP BY (usually the first one).
-    int count;
-} Collapsed_Notification;
+    int group_id;    // something that uniquely identifies a group of notifications and it is computed as ifnull(reminder_id, -id)
+    int group_count; // the amount of notificatiosn in the group (must be always > 0)
+} Grouped_Notification;
 
 typedef struct {
-    Collapsed_Notification *items;
+    Grouped_Notification *items;
     size_t count;
     size_t capacity;
-} Collapsed_Notifications;
+} Grouped_Notifications;
 
-bool load_active_collapsed_notifications(sqlite3 *db, Collapsed_Notifications *notifs)
+bool load_active_grouped_notifications(sqlite3 *db, Grouped_Notifications *notifs)
 {
     bool result = true;
     sqlite3_stmt *stmt = NULL;
@@ -163,11 +161,8 @@ bool load_active_collapsed_notifications(sqlite3 *db, Collapsed_Notifications *n
     //   Which is a working solution, but all the other problems UUIDs address remain.
 
     int ret = sqlite3_prepare_v2(db,
-        "SELECT id, title, datetime(created_at, 'localtime') as ts, reminder_id, count(*) "
-        "FROM Notifications "
-        "WHERE dismissed_at IS NULL "
-        "GROUP BY ifnull(reminder_id, -id) "
-        "ORDER BY ts;",
+        "SELECT id, title, datetime(created_at, 'localtime') as ts, reminder_id, ifnull(reminder_id, -id) as group_id, count(*) as group_count "
+        "FROM Notifications WHERE dismissed_at IS NULL GROUP BY group_id ORDER BY ts;",
         -1, &stmt, NULL);
     if (ret != SQLITE_OK) {
         LOG_SQLITE3_ERROR(db);
@@ -180,13 +175,15 @@ bool load_active_collapsed_notifications(sqlite3 *db, Collapsed_Notifications *n
         const char *title = temp_strdup((const char *)sqlite3_column_text(stmt, column++));
         const char *created_at = temp_strdup((const char *)sqlite3_column_text(stmt, column++));
         int reminder_id = sqlite3_column_int(stmt, column++);
-        int count = sqlite3_column_int(stmt, column++);
-        da_append(notifs, ((Collapsed_Notification) {
+        int group_id = sqlite3_column_int(stmt, column++);
+        int group_count = sqlite3_column_int(stmt, column++);
+        da_append(notifs, ((Grouped_Notification) {
             .id = id,
             .title = title,
             .created_at = created_at,
             .reminder_id = reminder_id,
-            .count = count,
+            .group_id = group_id,
+            .group_count = group_count,
         }));
     }
 
@@ -204,16 +201,16 @@ bool show_active_notifications(sqlite3 *db)
 {
     bool result = true;
 
-    Collapsed_Notifications notifs = {0};
-    if (!load_active_collapsed_notifications(db, &notifs)) return_defer(false);
+    Grouped_Notifications notifs = {0};
+    if (!load_active_grouped_notifications(db, &notifs)) return_defer(false);
 
     for (size_t i = 0; i < notifs.count; ++i) {
-        Collapsed_Notification *it = &notifs.items[i];
-        assert(it->count >= 0);
-        if (it->count == 1) {
+        Grouped_Notification *it = &notifs.items[i];
+        assert(it->group_count > 0);
+        if (it->group_count == 1) {
             printf("%zu: %s (%s)\n", i, it->title, it->created_at);
         } else {
-            printf("%zu: [%d] %s (%s)\n", i, it->count, it->title, it->created_at);
+            printf("%zu: [%d] %s (%s)\n", i, it->group_count, it->title, it->created_at);
         }
     }
 
@@ -222,18 +219,21 @@ defer:
     return result;
 }
 
-bool dismiss_notification_by_id(sqlite3 *db, int id)
+bool dismiss_grouped_notification_by_group_id(sqlite3 *db, int group_id)
 {
     bool result = true;
     sqlite3_stmt *stmt = NULL;
 
-    int ret = sqlite3_prepare_v2(db, "UPDATE Notifications SET dismissed_at = CURRENT_TIMESTAMP WHERE id = ?", -1, &stmt, NULL);
+    int ret = sqlite3_prepare_v2(db,
+            "UPDATE Notifications SET dismissed_at = CURRENT_TIMESTAMP "
+            "WHERE dismissed_at is NULL AND ifnull(reminder_id, -id) = ?", -1,
+            &stmt, NULL);
     if (ret != SQLITE_OK) {
         LOG_SQLITE3_ERROR(db);
         return_defer(false);
     }
 
-    if (sqlite3_bind_int(stmt, 1, id) != SQLITE_OK) {
+    if (sqlite3_bind_int(stmt, 1, group_id) != SQLITE_OK) {
         LOG_SQLITE3_ERROR(db);
         return_defer(false);
     }
@@ -248,17 +248,18 @@ defer:
     return result;
 }
 
-bool dismiss_notification_by_index(sqlite3 *db, int index)
+bool dismiss_grouped_notification_by_index(sqlite3 *db, int index, int *dismissed_count)
 {
     bool result = true;
 
-    Collapsed_Notifications notifs = {0};
-    if (!load_active_collapsed_notifications(db, &notifs)) return_defer(false);
+    Grouped_Notifications notifs = {0};
+    if (!load_active_grouped_notifications(db, &notifs)) return_defer(false);
     if (!(0 <= index && (size_t)index < notifs.count)) {
         fprintf(stderr, "ERROR: %d is not a valid index of an active notification\n", index);
         return_defer(false);
     }
-    if (!dismiss_notification_by_id(db, notifs.items[index].id)) return_defer(false);
+    if (!dismiss_grouped_notification_by_group_id(db, notifs.items[index].group_id)) return_defer(false);
+    if (dismissed_count) *dismissed_count = notifs.items[index].group_count;
 
 defer:
     free(notifs.items);
@@ -542,7 +543,7 @@ void sb_append_html_escaped_buf(String_Builder *sb, const char *buf, size_t size
     }
 }
 
-void render_index_page(String_Builder *sb, Collapsed_Notifications notifs, Reminders reminders)
+void render_index_page(String_Builder *sb, Grouped_Notifications notifs, Reminders reminders)
 {
 #define OUT(buf, size) sb_append_buf(sb, buf, size)
 #define ESCAPED_OUT(buf, size) sb_append_html_escaped_buf(sb, buf, size)
@@ -599,7 +600,6 @@ int main(int argc, char **argv)
         return_defer(0);
     }
 
-    // TODO: maybe `dismiss` should dismiss the entire group of Collapsed Notifications?
     // TODO: `dismiss` should accept several indices
     if (strcmp(command_name, "dismiss") == 0) {
         if (argc <= 0) {
@@ -609,14 +609,16 @@ int main(int argc, char **argv)
         }
 
         int index = atoi(shift(argv, argc));
-        if (!dismiss_notification_by_index(db, index)) return_defer(1);
+        int dismissed_count = 0;
+        if (!dismiss_grouped_notification_by_index(db, index, &dismissed_count)) return_defer(1);
         if (!show_active_notifications(db)) return_defer(1);
+        printf("Dismissed %d notifications\n", dismissed_count);
         return_defer(0);
     }
 
     if (strcmp(command_name, "serve") == 0) {
         const char *addr = "127.0.0.1";
-        uint16_t port = 6969;
+        uint16_t port = 6969; // TODO: customize the port
 
         int server_fd = socket(AF_INET, SOCK_STREAM, 0);
         if (server_fd < 0) {
@@ -647,7 +649,7 @@ int main(int argc, char **argv)
 
         printf("Listening to http://%s:%d/\n", addr, port);
 
-        Collapsed_Notifications notifs = {0};
+        Grouped_Notifications notifs = {0};
         Reminders reminders = {0};
         String_Builder response = {0};
         String_Builder body = {0};
@@ -661,7 +663,7 @@ int main(int argc, char **argv)
                 return_defer(1);
             }
 
-            if (!load_active_collapsed_notifications(db, &notifs)) return_defer(false);
+            if (!load_active_grouped_notifications(db, &notifs)) return_defer(false);
             if (!load_active_reminders(db, &reminders)) return_defer(false);
             render_index_page(&body, notifs, reminders);
 

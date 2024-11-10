@@ -9,12 +9,12 @@
     <ul>
     %if (notifs.count > 0) {%
         %for (size_t i = 0; i < notifs.count; ++i) {%
-            %Collapsed_Notification *it = &notifs.items[i];%
-            %assert(it->count > 0);%
-            %if (it->count == 1) {%
+            %Grouped_Notification *it = &notifs.items[i];%
+            %assert(it->group_count > 0);%
+            %if (it->group_count == 1) {%
                 <li>%ESCAPED_OUT(it->title, strlen(it->title));%</li>
             %} else {%
-                <li>[%INT(it->count);%] %ESCAPED_OUT(it->title, strlen(it->title));%</li>
+                <li>[%INT(it->group_count);%] %ESCAPED_OUT(it->title, strlen(it->title));%</li>
             %}%
         %}%
     %} else {%
