@@ -19,6 +19,7 @@ static Flag build_flags[COUNT_BUILD_FLAGS] = {
 // Folder must end with forward slash /
 #define BUILD_FOLDER "./build/"
 #define SRC_FOLDER "./src/"
+#define SRC_BUILD_FOLDER "./src_build/"
 #define GIT_HASH_FILE BUILD_FOLDER"git-hash.txt"
 #define TORE_BIN_PATH (build_flags[BF_ASAN].value ? BUILD_FOLDER"tore-asan" : BUILD_FOLDER"tore")
 #define SQLITE3_OBJ_PATH (build_flags[BF_ASAN].value ? BUILD_FOLDER"sqlite3-asan.o" : BUILD_FOLDER"sqlite3.o")
@@ -116,7 +117,7 @@ int main(int argc, char **argv)
     builder_compiler(&cmd);
     builder_common_flags(&cmd);
     builder_output(&cmd, BUILD_FOLDER"tt");
-    builder_inputs(&cmd, SRC_FOLDER"tt.c");
+    builder_inputs(&cmd, SRC_BUILD_FOLDER"tt.c");
     if (!cmd_run_sync_and_reset(&cmd)) return 1;
 
     Fd index_fd = fd_open_for_write(BUILD_FOLDER"index_page.h");
