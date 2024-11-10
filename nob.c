@@ -91,7 +91,7 @@ defer:
 
 void usage(const char *program_name)
 {
-    printf("Usage: %s [Build Flags] <command> [Command Flags]\n", program_name);
+    printf("Usage: %s [Build Flags] [Command] [Command Flags]\n", program_name);
     printf("Build flags:\n");
     print_flags(build_flags, COUNT_BUILD_FLAGS);
 }
