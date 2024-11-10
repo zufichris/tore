@@ -159,13 +159,11 @@ bool load_active_collapsed_notifications(sqlite3 *db, Collapsed_Notifications *n
         return_defer(false);
     }
 
-    ret = sqlite3_step(stmt);
-    for (int row = 0; ret == SQLITE_ROW; ++row) {
+    for (ret = sqlite3_step(stmt); ret == SQLITE_ROW; ret = sqlite3_step(stmt)) {
         int column = 0;
         int id = sqlite3_column_int(stmt, column++);
-        // TODO: maybe put all of these dupped strings into their own arena
-        const char *title = strdup((const char *)sqlite3_column_text(stmt, column++));
-        const char *created_at = strdup((const char *)sqlite3_column_text(stmt, column++));
+        const char *title = temp_strdup((const char *)sqlite3_column_text(stmt, column++));
+        const char *created_at = temp_strdup((const char *)sqlite3_column_text(stmt, column++));
         int reminder_id = sqlite3_column_int(stmt, column++);
         int count = sqlite3_column_int(stmt, column++);
         da_append(notifs, ((Collapsed_Notification) {
@@ -175,7 +173,6 @@ bool load_active_collapsed_notifications(sqlite3 *db, Collapsed_Notifications *n
             .reminder_id = reminder_id,
             .count = count,
         }));
-        ret = sqlite3_step(stmt);
     }
 
     if (ret != SQLITE_DONE) {
@@ -316,20 +313,18 @@ bool load_active_reminders(sqlite3 *db, Reminders *reminders)
         return_defer(false);
     }
 
-    ret = sqlite3_step(stmt);
-    for (int index = 0; ret == SQLITE_ROW; ++index) {
+    for (ret = sqlite3_step(stmt); ret == SQLITE_ROW; ret = sqlite3_step(stmt)) {
         int id = sqlite3_column_int(stmt, 0);
-        const char *title = strdup((const char *)sqlite3_column_text(stmt, 1));
-        const char *scheduled_at = strdup((const char *)sqlite3_column_text(stmt, 2));
+        const char *title = temp_strdup((const char *)sqlite3_column_text(stmt, 1));
+        const char *scheduled_at = temp_strdup((const char *)sqlite3_column_text(stmt, 2));
         const char *period = (const char *)sqlite3_column_text(stmt, 3);
-        if (period != NULL) period = strdup(period);
+        if (period != NULL) period = temp_strdup(period);
         da_append(reminders, ((Reminder) {
             .id = id,
             .title = title,
             .scheduled_at = scheduled_at,
             .period = period,
         }));
-        ret = sqlite3_step(stmt);
     }
 
     if (ret != SQLITE_DONE) {
@@ -337,6 +332,7 @@ bool load_active_reminders(sqlite3 *db, Reminders *reminders)
         return_defer(false);
     }
 defer:
+    if (stmt) sqlite3_finalize(stmt);
     return result;
 }
 
@@ -364,7 +360,7 @@ Period_Modifier tore_period_modifiers[COUNT_PERIODS] = {
 
 Period period_by_tore_modifier(const char *modifier)
 {
-    for (Period period = PERIOD_NONE; period < COUNT_PERIODS; ++period) {
+    for (Period period = 0; period < COUNT_PERIODS; ++period) {
         if (strcmp(modifier, tore_period_modifiers[period].modifier) == 0) {
             return period;
         }
