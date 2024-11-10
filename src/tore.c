@@ -147,6 +147,21 @@ bool load_active_collapsed_notifications(sqlite3 *db, Collapsed_Notifications *n
     bool result = true;
     sqlite3_stmt *stmt = NULL;
 
+    // TODO: Consider using UUIDs for identifying Notifications and Reminders
+    //   Read something like https://www.cockroachlabs.com/blog/what-is-a-uuid/ for UUIDs in DBs 101
+    //   (There are lots of articles like these online, just google the topic up).
+    //   This is related to visually grouping non-dismissed Notifications created by the same Reminders purely in SQL.
+    //   Doing it straightforwardly would be something like
+    //   ```sql
+    //   SELECT id, title, datetime(created_at, 'localtime') FROM Notifications WHERE dismissed_at IS NULL GROUP BY ifnull(reminder_id, id)
+    //   ```
+    //   but you may run into problems if reminder_id and id collide. Using UUIDs for all the rows of all the tables solves this.
+    //   Right now it is solved by making the row id negative.
+    //   ```sql
+    //   SELECT id, title, datetime(created_at, 'localtime') FROM Notifications WHERE dismissed_at IS NULL GROUP BY ifnull(reminder_id, -id)
+    //   ```
+    //   Which is a working solution, but all the other problems UUIDs address remain.
+
     int ret = sqlite3_prepare_v2(db,
         "SELECT id, title, datetime(created_at, 'localtime') as ts, reminder_id, count(*) "
         "FROM Notifications "
@@ -191,21 +206,6 @@ bool show_active_notifications(sqlite3 *db)
 
     Collapsed_Notifications notifs = {0};
     if (!load_active_collapsed_notifications(db, &notifs)) return_defer(false);
-
-    // TODO: Consider using UUIDs for identifying Notifications and Reminders
-    //   Read something like https://www.cockroachlabs.com/blog/what-is-a-uuid/ for UUIDs in DBs 101
-    //   (There are lots of articles like these online, just google the topic up).
-    //   This is related to visually grouping non-dismissed Notifications created by the same Reminders purely in SQL.
-    //   Doing it straightforwardly would be something like
-    //   ```sql
-    //   SELECT id, title, datetime(created_at, 'localtime') FROM Notifications WHERE dismissed_at IS NULL GROUP BY ifnull(reminder_id, id)
-    //   ```
-    //   but you may run into problems if reminder_id and id collide. Using UUIDs for all the rows of all the tables solves this.
-    //   Right now it is solved by making the row id negative.
-    //   ```sql
-    //   SELECT id, title, datetime(created_at, 'localtime') FROM Notifications WHERE dismissed_at IS NULL GROUP BY ifnull(reminder_id, -id)
-    //   ```
-    //   Which is a working solution, but all the other problems UUIDs address remain.
 
     for (size_t i = 0; i < notifs.count; ++i) {
         Collapsed_Notification *it = &notifs.items[i];
