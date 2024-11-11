@@ -1,5 +1,6 @@
 #define NOB_IMPLEMENTATION
 #define NOB_STRIP_PREFIX
+#define NOB_GRU_DELETE_OLD_BINARY
 #include "nob.h"
 
 #include "./src_build/flags.c"

@@ -249,6 +249,7 @@ bool nob_copy_directory_recursively(const char *src_path, const char *dst_path);
 bool nob_read_entire_dir(const char *parent, Nob_File_Paths *children);
 bool nob_write_entire_file(const char *path, const void *data, size_t size);
 Nob_File_Type nob_get_file_type(const char *path);
+bool nob_delete_file(const char *path);
 
 #define nob_return_defer(value) do { result = (value); goto defer; } while(0)
 
@@ -661,6 +662,12 @@ void nob__go_rebuild_urself(int argc, char **argv, const char *source_path, ...)
         nob_rename(old_binary_path, binary_path);
         exit(1);
     }
+#ifdef NOB_GRU_DELETE_OLD_BINARY
+    // TODO: this is an experimental behavior behind a compilation flag.
+    // Once it is confirmed that it does not cause much problems on both POSIX and Windows
+    // we may turn it on by default.
+    nob_delete_file(old_binary_path);
+#endif // NOB_GRU_DELETE_OLD_BINARY
 
     nob_cmd_append(&cmd, binary_path);
     nob_da_append_many(&cmd, argv, argc);
@@ -1199,6 +1206,24 @@ Nob_File_Type nob_get_file_type(const char *path)
 #endif // _WIN32
 }
 
+bool nob_delete_file(const char *path)
+{
+    nob_log(NOB_INFO, "deleting %s", path);
+#ifdef _WIN32
+    if (!DeleteFileA(path)) {
+        nob_log(NOB_ERROR, "Could not delete file %s: %s", nob_win32_error_message(GetLastError()));
+        return false;
+    }
+    return true;
+#else
+    if (remove(path) < 0) {
+        nob_log(NOB_ERROR, "Could not delete file %s: %s", strerror(errno));
+        return false;
+    }
+    return true;
+#endif // _WIN32
+}
+
 bool nob_copy_directory_recursively(const char *src_path, const char *dst_path)
 {
     bool result = true;
@@ -1724,6 +1749,7 @@ int closedir(DIR *dirp)
         #define read_entire_dir nob_read_entire_dir
         #define write_entire_file nob_write_entire_file
         #define get_file_type nob_get_file_type
+        #define delete_file nob_delete_file
         #define return_defer nob_return_defer
         #define da_append nob_da_append
         #define da_free nob_da_free
@@ -1791,6 +1817,8 @@ int closedir(DIR *dirp)
    Revision history:
 
       1.10.0-dev         Add NOB_GO_REBUILD_URSELF_PLUS()
+                         Add nob_delete_file()
+                         Add experimental NOB_GRU_DELETE_OLD_BINARY feature flag
       1.9.0 (2024-11-06) Add Nob_Cmd_Redirect mechanism (By @rexim)
                          Add nob_path_name() (By @0dminnimda)
       1.8.0 (2024-11-03) Add nob_cmd_extend() (By @0dminnimda)
