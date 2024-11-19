@@ -82,7 +82,7 @@ char *get_git_hash(Cmd *cmd)
         .fdout = &fdout
     })) return_defer(NULL);
     if (!read_entire_file(GIT_HASH_FILE, &sb)) return_defer(NULL);
-    while (sb.count > 0 && isspace(sb.items[--sb.count]));
+    while (sb.count > 0 && isspace(sb.items[sb.count - 1])) sb.count -= 1;
     sb_append_null(&sb);
     return_defer(sb.items);
 defer:
