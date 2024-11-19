@@ -131,6 +131,64 @@ typedef struct {
     const char *created_at;
     int reminder_id;
     int group_id;    // something that uniquely identifies a group of notifications and it is computed as ifnull(reminder_id, -id)
+} Notification;
+
+typedef struct {
+    Notification *items;
+    size_t count;
+    size_t capacity;
+} Notifications;
+
+bool load_active_notifications_of_group(sqlite3 *db, int group_id, Notifications *ns)
+{
+    bool result = true;
+    sqlite3_stmt *stmt = NULL;
+
+    int ret = sqlite3_prepare_v2(db,
+        "SELECT id, title, datetime(created_at, 'localtime') as ts, reminder_id, ifnull(reminder_id, -id) as group_id "
+        "FROM Notifications WHERE dismissed_at IS NULL AND group_id = ? ORDER BY ts;",
+        -1, &stmt, NULL);
+    if (ret != SQLITE_OK) {
+        LOG_SQLITE3_ERROR(db);
+        return_defer(false);
+    }
+
+    if (sqlite3_bind_int(stmt, 1, group_id) != SQLITE_OK) {
+        LOG_SQLITE3_ERROR(db);
+        return_defer(false);
+    }
+
+    for (ret = sqlite3_step(stmt); ret == SQLITE_ROW; ret = sqlite3_step(stmt)) {
+        int column = 0;
+        int id = sqlite3_column_int(stmt, column++);
+        const char *title = temp_strdup((const char *)sqlite3_column_text(stmt, column++));
+        const char *created_at = temp_strdup((const char *)sqlite3_column_text(stmt, column++));
+        int reminder_id = sqlite3_column_int(stmt, column++);
+        int group_id = sqlite3_column_int(stmt, column++);
+        da_append(ns, ((Notification) {
+            .id = id,
+            .title = title,
+            .created_at = created_at,
+            .reminder_id = reminder_id,
+            .group_id = group_id,
+        }));
+    }
+
+    if (ret != SQLITE_DONE) {
+        LOG_SQLITE3_ERROR(db);
+        return_defer(false);
+    }
+
+defer:
+    if (stmt) sqlite3_finalize(stmt);
+    return result;
+}
+
+typedef struct {
+    const char *title;       // TODO: maybe in case of group_id > 0 the title should be the title of the corresponding reminder?
+    const char *created_at;  // TODO: maybe in case of group_id > 0 the created_at should be the created_at of the latest notification?
+    int reminder_id;
+    int group_id;    // something that uniquely identifies a group of notifications and it is computed as ifnull(reminder_id, -id)
     int group_count; // the amount of notificatiosn in the group (must be always > 0)
 } Grouped_Notification;
 
@@ -161,7 +219,7 @@ bool load_active_grouped_notifications(sqlite3 *db, Grouped_Notifications *notif
     //   Which is a working solution, but all the other problems UUIDs address remain.
 
     int ret = sqlite3_prepare_v2(db,
-        "SELECT id, title, datetime(created_at, 'localtime') as ts, reminder_id, ifnull(reminder_id, -id) as group_id, count(*) as group_count "
+        "SELECT title, datetime(created_at, 'localtime') as ts, reminder_id, ifnull(reminder_id, -id) as group_id, count(*) as group_count "
         "FROM Notifications WHERE dismissed_at IS NULL GROUP BY group_id ORDER BY ts;",
         -1, &stmt, NULL);
     if (ret != SQLITE_OK) {
@@ -171,14 +229,12 @@ bool load_active_grouped_notifications(sqlite3 *db, Grouped_Notifications *notif
 
     for (ret = sqlite3_step(stmt); ret == SQLITE_ROW; ret = sqlite3_step(stmt)) {
         int column = 0;
-        int id = sqlite3_column_int(stmt, column++);
         const char *title = temp_strdup((const char *)sqlite3_column_text(stmt, column++));
         const char *created_at = temp_strdup((const char *)sqlite3_column_text(stmt, column++));
         int reminder_id = sqlite3_column_int(stmt, column++);
         int group_id = sqlite3_column_int(stmt, column++);
         int group_count = sqlite3_column_int(stmt, column++);
         da_append(notifs, ((Grouped_Notification) {
-            .id = id,
             .title = title,
             .created_at = created_at,
             .reminder_id = reminder_id,
@@ -216,6 +272,31 @@ bool show_active_notifications(sqlite3 *db)
 
 defer:
     free(notifs.items);
+    return result;
+}
+
+bool show_expanded_notifications_by_index(sqlite3 *db, size_t index)
+{
+    bool result = true;
+
+    Grouped_Notifications gns = {0};
+    Notifications ns = {0};
+
+    if (!load_active_grouped_notifications(db, &gns)) return_defer(false);
+    if (index >= gns.count) {
+        fprintf(stderr, "ERROR: invalid index\n");
+        return false;
+    }
+    if (!load_active_notifications_of_group(db, gns.items[index].group_id, &ns)) return_defer(false);
+
+    for (size_t i = 0; i < ns.count; ++i) {
+        Notification *it = &ns.items[i];
+        printf("%s (%s)\n", it->title, it->created_at);
+    }
+
+defer:
+    free(gns.items);
+    free(ns.items);
     return result;
 }
 
@@ -721,7 +802,7 @@ int main(int argc, char **argv)
 
     if (strcmp(command_name, "forget") == 0) {
         if (argc <= 0) {
-            fprintf(stderr, "Usage: %s forget <number>\n", program_name);
+            fprintf(stderr, "Usage: %s %s <number>\n", program_name, command_name);
             fprintf(stderr, "ERROR: expected number\n");
             return_defer(1);
         }
@@ -781,6 +862,17 @@ int main(int argc, char **argv)
 
         if (!create_new_reminder(db, title, scheduled_at, period, period_length)) return_defer(1);
         if (!show_active_reminders(db)) return_defer(1);
+        return_defer(0);
+    }
+
+    if (strcmp(command_name, "expand") == 0) {
+        if (argc <= 0) {
+            fprintf(stderr, "Usage: %s %s <index>\n", program_name, command_name);
+            fprintf(stderr, "ERROR: no index is provided\n");
+            return_defer(1);
+        }
+        int index = atoi(shift(argv, argc));
+        if (!show_expanded_notifications_by_index(db, index)) return_defer(1);
         return_defer(0);
     }
 
