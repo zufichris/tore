@@ -329,21 +329,24 @@ defer:
     return result;
 }
 
-bool dismiss_grouped_notification_by_index(sqlite3 *db, int index, int *dismissed_count)
+bool dismiss_grouped_notifications_by_indices_from_args(sqlite3 *db, int *how_many_dismissed, int argc, char **argv)
 {
     bool result = true;
 
-    Grouped_Notifications notifs = {0};
-    if (!load_active_grouped_notifications(db, &notifs)) return_defer(false);
-    if (!(0 <= index && (size_t)index < notifs.count)) {
-        fprintf(stderr, "ERROR: %d is not a valid index of an active notification\n", index);
-        return_defer(false);
+    Grouped_Notifications gns = {0};
+    if (!load_active_grouped_notifications(db, &gns)) return_defer(false);
+    while (argc > 0) {
+        int index = atoi(shift(argv, argc));
+        if (!(0 <= index && (size_t)index < gns.count)) {
+            fprintf(stderr, "WARNING: %d is not a valid index of an active notification\n", index);
+            continue;
+        }
+        if (!dismiss_grouped_notification_by_group_id(db, gns.items[index].group_id)) return_defer(false);
+        if (how_many_dismissed) *how_many_dismissed += gns.items[index].group_count;
     }
-    if (!dismiss_grouped_notification_by_group_id(db, notifs.items[index].group_id)) return_defer(false);
-    if (dismissed_count) *dismissed_count = notifs.items[index].group_count;
 
 defer:
-    free(notifs.items);
+    free(gns.items);
     return result;
 }
 
@@ -681,19 +684,17 @@ int main(int argc, char **argv)
         return_defer(0);
     }
 
-    // TODO: `dismiss` should accept several indices
     if (strcmp(command_name, "dismiss") == 0) {
         if (argc <= 0) {
-            fprintf(stderr, "Usage: %s dismiss <index>\n", program_name);
-            fprintf(stderr, "ERROR: expected index\n");
+            fprintf(stderr, "Usage: %s dismiss <indices...>\n", program_name);
+            fprintf(stderr, "ERROR: expected indices\n");
             return_defer(1);
         }
 
-        int index = atoi(shift(argv, argc));
-        int dismissed_count = 0;
-        if (!dismiss_grouped_notification_by_index(db, index, &dismissed_count)) return_defer(1);
+        int how_many_dismissed = 0;
+        if (!dismiss_grouped_notifications_by_indices_from_args(db, &how_many_dismissed, argc, argv)) return_defer(1);
         if (!show_active_notifications(db)) return_defer(1);
-        printf("Dismissed %d notifications\n", dismissed_count);
+        printf("Dismissed %d notifications\n", how_many_dismissed);
         return_defer(0);
     }
 
