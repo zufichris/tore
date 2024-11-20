@@ -169,3 +169,4 @@ int main(int argc, char **argv)
     nob_log(ERROR, "Unknown command %s", command_name);
     return 1;
 }
+// TODO: automatic record/replay testing

@@ -638,256 +638,437 @@ void render_index_page(String_Builder *sb, Grouped_Notifications notifs, Reminde
 #undef ESCAPED_OUT
 }
 
-int main(int argc, char **argv)
+sqlite3 *open_tore_db(void)
 {
-    int result = 0;
-    sqlite3 *db = NULL;
-    String_Builder sb = {0};
-
-    srand(time(0));
-
-    const char *program_name = shift(argv, argc);
-
-    const char *command_name= "checkout";
-    if (argc > 0) command_name = shift(argv, argc);
-
-    // TODO: implement `help` command
-
-    if (strcmp(command_name, "version") == 0) {
-        fprintf(stderr, "GIT HASH: "GIT_HASH"\n");
-        return 0;
-    }
+    sqlite3 *result = NULL;
 
     const char *home_path = getenv("HOME");
     if (home_path == NULL) {
         fprintf(stderr, "ERROR: No $HOME environment variable is setup. We need it to find the location of ~/"TORE_FILENAME" database.\n");
-        return_defer(1);
+        return_defer(NULL);
     }
 
     const char *tore_path = temp_sprintf("%s/"TORE_FILENAME, home_path);
 
-    int ret = sqlite3_open(tore_path, &db);
+    int ret = sqlite3_open(tore_path, &result);
     if (ret != SQLITE_OK) {
         fprintf(stderr, "ERROR: %s: %s\n", tore_path, sqlite3_errstr(ret));
-        return_defer(1);
+        return_defer(NULL);
     }
 
-    if (!create_schema(db, tore_path)) return_defer(1);
-
-    // TODO: `undo` command
-
-    if (strcmp(command_name, "checkout") == 0) {
-        if (!fire_off_reminders(db)) return_defer(1);
-        if (!show_active_notifications(db)) return_defer(1);
-        // TODO: show reminders that are about to fire off
-        //   Maybe they should fire off a "warning" notification before doing the main one?
-        return_defer(0);
+    if (!create_schema(result, tore_path)) {
+        sqlite3_close(result);
+        return_defer(NULL);
     }
 
-    if (strcmp(command_name, "dismiss") == 0) {
-        if (argc <= 0) {
-            fprintf(stderr, "Usage: %s dismiss <indices...>\n", program_name);
-            fprintf(stderr, "ERROR: expected indices\n");
-            return_defer(1);
-        }
+defer:
+    return result;
+}
 
-        int how_many_dismissed = 0;
-        if (!dismiss_grouped_notifications_by_indices_from_args(db, &how_many_dismissed, argc, argv)) return_defer(1);
-        if (!show_active_notifications(db)) return_defer(1);
-        printf("Dismissed %d notifications\n", how_many_dismissed);
-        return_defer(0);
+typedef struct Command {
+    const char *name;
+    const char *description;
+    const char *signature;
+    bool (*run)(struct Command *self, const char *program_name, int argc, char **argv);
+} Command;
+
+bool version_run(Command *self, const char *program_name, int argc, char **argv)
+{
+    UNUSED(self);
+    UNUSED(program_name);
+    UNUSED(argc);
+    UNUSED(argv);
+    fprintf(stderr, "GIT HASH: "GIT_HASH"\n");
+    return true;
+}
+
+bool checkout_run(Command *self, const char *program_name, int argc, char **argv)
+{
+    UNUSED(self);
+    UNUSED(program_name);
+    UNUSED(argc);
+    UNUSED(argv);
+    bool result = true;
+    sqlite3 *db = open_tore_db();
+    if (!db) return_defer(false);
+    if (!fire_off_reminders(db)) return_defer(false);
+    if (!show_active_notifications(db)) return_defer(false);
+    // TODO: show reminders that are about to fire off
+    //   Maybe they should fire off a "warning" notification before doing the main one?
+defer:
+    if (db) sqlite3_close(db);
+    return result;
+}
+
+bool dismiss_run(Command *self, const char *program_name, int argc, char **argv)
+{
+    bool result = true;
+    sqlite3 *db = NULL;
+    if (argc <= 0) {
+        fprintf(stderr, "Usage: %s %s %s\n", program_name, self->name, self->signature);
+        fprintf(stderr, "ERROR: expected indices\n");
+        return_defer(false);
     }
 
-    if (strcmp(command_name, "serve") == 0) {
-        const char *addr = "127.0.0.1";
-        uint16_t port = 6969; // TODO: customize the port
+    db = open_tore_db();
+    if (!db) return_defer(false);
 
-        int server_fd = socket(AF_INET, SOCK_STREAM, 0);
-        if (server_fd < 0) {
-            fprintf(stderr, "ERROR: Could not create socket epicly: %s\n", strerror(errno));
-            return_defer(1);
+    int how_many_dismissed = 0;
+    if (!dismiss_grouped_notifications_by_indices_from_args(db, &how_many_dismissed, argc, argv)) return_defer(false);
+    if (!show_active_notifications(db)) return_defer(false);
+    printf("Dismissed %d notifications\n", how_many_dismissed);
+defer:
+    if (db) sqlite3_close(db);
+    return result;
+}
+
+bool serve_run(Command *self, const char *program_name, int argc, char **argv)
+{
+    UNUSED(self);
+    UNUSED(program_name);
+    UNUSED(argc);
+    UNUSED(argv);
+    bool result = true;
+    sqlite3 *db = open_tore_db();
+    if (!db) return_defer(false);
+    const char *addr = "127.0.0.1";
+    uint16_t port = 6969; // TODO: customize the port
+
+    int server_fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (server_fd < 0) {
+        fprintf(stderr, "ERROR: Could not create socket epicly: %s\n", strerror(errno));
+        return_defer(false);
+    }
+
+    int option = 1;
+    setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &option, sizeof(option));
+
+    struct sockaddr_in server_addr;
+    memset(&server_addr, 0, sizeof(server_addr));
+    server_addr.sin_family = AF_INET;
+    server_addr.sin_port = htons(port);
+    server_addr.sin_addr.s_addr = inet_addr(addr);
+
+    ssize_t err = bind(server_fd, (struct sockaddr*) &server_addr, sizeof(server_addr));
+    if (err != 0) {
+        fprintf(stderr, "ERROR: Could not bind socket epicly: %s\n", strerror(errno));
+        return_defer(false);
+    }
+
+    err = listen(server_fd, 69);
+    if (err != 0) {
+        fprintf(stderr, "ERRO: Could not listen to socket, it's too quiet: %s\n", strerror(errno));
+        return_defer(false);
+    }
+
+    printf("Listening to http://%s:%d/\n", addr, port);
+
+    Grouped_Notifications notifs = {0};
+    Reminders reminders = {0};
+    String_Builder response = {0};
+    String_Builder body = {0};
+    for (;;) {
+        // TODO: log queries
+        struct sockaddr_in client_addr;
+        socklen_t client_addrlen = 0;
+        int client_fd = accept(server_fd, (struct sockaddr*)&client_addr, &client_addrlen);
+        if (client_fd < 0) {
+            fprintf(stderr, "ERROR: Could not accept connection. This is unacceptable! %s\n", strerror(errno));
+            return_defer(false);
         }
 
-        int option = 1;
-        setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &option, sizeof(option));
+        if (!load_active_grouped_notifications(db, &notifs)) return_defer(false);
+        if (!load_active_reminders(db, &reminders)) return_defer(false);
+        render_index_page(&body, notifs, reminders);
 
-        struct sockaddr_in server_addr;
-        memset(&server_addr, 0, sizeof(server_addr));
-        server_addr.sin_family = AF_INET;
-        server_addr.sin_port = htons(port);
-        server_addr.sin_addr.s_addr = inet_addr(addr);
+        sb_append_cstr(&response, "HTTP/1.0 200\r\n");
+        sb_append_cstr(&response, "Content-Type: text/html\r\n");
+        sb_append_cstr(&response, temp_sprintf("Content-Length: %zu\r\n", body.count));
+        sb_append_cstr(&response, "Connection: close\r\n");
+        sb_append_cstr(&response, "\r\n");
+        sb_append_buf(&response, body.items, body.count);
 
-        ssize_t err = bind(server_fd, (struct sockaddr*) &server_addr, sizeof(server_addr));
-        if (err != 0) {
-            fprintf(stderr, "ERROR: Could not bind socket epicly: %s\n", strerror(errno));
-            return_defer(1);
-        }
-
-        err = listen(server_fd, 69);
-        if (err != 0) {
-            fprintf(stderr, "ERRO: Could not listen to socket, it's too quiet: %s\n", strerror(errno));
-            return_defer(1);
-        }
-
-        printf("Listening to http://%s:%d/\n", addr, port);
-
-        Grouped_Notifications notifs = {0};
-        Reminders reminders = {0};
-        String_Builder response = {0};
-        String_Builder body = {0};
-        for (;;) {
-            // TODO: log queries
-            struct sockaddr_in client_addr;
-            socklen_t client_addrlen = 0;
-            int client_fd = accept(server_fd, (struct sockaddr*)&client_addr, &client_addrlen);
-            if (client_fd < 0) {
-                fprintf(stderr, "ERROR: Could not accept connection. This is unacceptable! %s\n", strerror(errno));
-                return_defer(1);
+        String_View untransfered = sb_to_sv(response);
+        while (untransfered.count > 0) {
+            ssize_t transfered = write(client_fd, untransfered.data, untransfered.count);
+            if (transfered < 0) {
+                fprintf(stderr, "ERROR: Could not write response: %s\n", strerror(errno));
+                break;
             }
-
-            if (!load_active_grouped_notifications(db, &notifs)) return_defer(false);
-            if (!load_active_reminders(db, &reminders)) return_defer(false);
-            render_index_page(&body, notifs, reminders);
-
-            sb_append_cstr(&response, "HTTP/1.0 200\r\n");
-            sb_append_cstr(&response, "Content-Type: text/html\r\n");
-            sb_append_cstr(&response, temp_sprintf("Content-Length: %zu\r\n", body.count));
-            sb_append_cstr(&response, "Connection: close\r\n");
-            sb_append_cstr(&response, "\r\n");
-            sb_append_buf(&response, body.items, body.count);
-
-            String_View untransfered = sb_to_sv(response);
-            while (untransfered.count > 0) {
-                ssize_t transfered = write(client_fd, untransfered.data, untransfered.count);
-                if (transfered < 0) {
-                    fprintf(stderr, "ERROR: Could not write response: %s\n", strerror(errno));
-                    break;
-                }
-                untransfered.data += transfered;
-                untransfered.count -= transfered;
-            }
-
-            close(client_fd);
-
-            notifs.count = 0;
-            reminders.count = 0;
-            body.count = 0;
-            response.count = 0;
-            temp_reset();
+            untransfered.data += transfered;
+            untransfered.count -= transfered;
         }
 
-        // TODO: The only way to stop the server is by SIGINT, but that probably doesn't close the db correctly.
-        // So we probably should add a SIGINT handler specifically for this.
+        close(client_fd);
 
-        UNREACHABLE("serve");
+        notifs.count = 0;
+        reminders.count = 0;
+        body.count = 0;
+        response.count = 0;
+        temp_reset();
     }
 
-    if (strcmp(command_name, "notify") == 0) {
-        if (argc <= 0) {
-            fprintf(stderr, "Usage: %s notify <title...>\n", program_name);
-            fprintf(stderr, "ERROR: expected title\n");
-            return_defer(1);
-        }
+    // TODO: The only way to stop the server is by SIGINT, but that probably doesn't close the db correctly.
+    // So we probably should add a SIGINT handler specifically for this.
 
-        for (bool pad = false; argc > 0; pad = true) {
-            if (pad) sb_append_cstr(&sb, " ");
-            sb_append_cstr(&sb, shift(argv, argc));
-        }
-        sb_append_null(&sb);
-        const char *title = sb.items;
-
-        if (!create_notification_with_title(db, title)) return_defer(1);
-        if (!show_active_notifications(db)) return_defer(1);
-        return_defer(0);
-    }
-
-    if (strcmp(command_name, "forget") == 0) {
-        if (argc <= 0) {
-            fprintf(stderr, "Usage: %s %s <number>\n", program_name, command_name);
-            fprintf(stderr, "ERROR: expected number\n");
-            return_defer(1);
-        }
-        int number = atoi(shift(argv, argc));
-        if (!remove_reminder_by_number(db, number)) return_defer(1);
-        if (!show_active_reminders(db)) return_defer(1);
-        return_defer(0);
-    }
-
-    if (strcmp(command_name, "remind") == 0) {
-        if (argc <= 0) {
-            if (!show_active_reminders(db)) return_defer(1);
-            return_defer(0);
-        }
-
-        const char *title = shift(argv, argc);
-        if (argc <= 0) {
-            fprintf(stderr, "Usage: %s remind [<title> <scheduled_at> [period]]\n", program_name);
-            fprintf(stderr, "ERROR: expected scheduled_at\n");
-            return_defer(1);
-        }
-
-        // TODO: Allow the scheduled_at to be things like "today", "tomorrow", etc
-        // TODO: research if it's possible to enforce the date format on the level of sqlite3 contraints
-        const char *scheduled_at = shift(argv, argc);
-        if (!verify_date_format(scheduled_at)) {
-            fprintf(stderr, "ERROR: %s is not a valid date format\n", scheduled_at);
-            return_defer(1);
-        }
-
-        Period period = PERIOD_NONE;
-        unsigned long period_length = 0;
-        if (argc > 0) {
-            const char *unparsed_period = shift(argv, argc);
-            char *endptr = NULL;
-            period_length = strtoul(unparsed_period, &endptr, 10);
-            if (endptr == unparsed_period) {
-                fprintf(stderr, "ERROR: Invalid period `%s`. Expected something like\n", unparsed_period);
-                for (Period p = 0; p < COUNT_PERIODS; ++p) {
-                    Period_Modifier *pm = &tore_period_modifiers[p];
-                    size_t l = rand()%9 + 1;
-                    fprintf(stderr, "    %lu%s - means every %lu %s\n", l, pm->modifier, l, pm->name);
-                }
-                return_defer(1);
-            }
-            unparsed_period = endptr;
-            period = period_by_tore_modifier(unparsed_period);
-            if (period == PERIOD_NONE) {
-                fprintf(stderr, "ERROR: Unknown period modifier `%s`. Expected modifiers are\n", unparsed_period);
-                for (Period p = 0; p < COUNT_PERIODS; ++p) {
-                    Period_Modifier *pm = &tore_period_modifiers[p];
-                    fprintf(stderr, "    %lu%s  - means every %lu %s\n", period_length, pm->modifier, period_length, pm->name);
-                }
-                return_defer(1);
-            }
-        }
-
-        if (!create_new_reminder(db, title, scheduled_at, period, period_length)) return_defer(1);
-        if (!show_active_reminders(db)) return_defer(1);
-        return_defer(0);
-    }
-
-    if (strcmp(command_name, "expand") == 0) {
-        if (argc <= 0) {
-            fprintf(stderr, "Usage: %s %s <index>\n", program_name, command_name);
-            fprintf(stderr, "ERROR: no index is provided\n");
-            return_defer(1);
-        }
-        int index = atoi(shift(argv, argc));
-        if (!show_expanded_notifications_by_index(db, index)) return_defer(1);
-        return_defer(0);
-    }
-
-    // TODO: some way to turn Notification into a Reminder
-
-    fprintf(stderr, "ERROR: unknown command %s\n", command_name);
-    return_defer(1);
+    UNREACHABLE("serve");
 
 defer:
     if (db) sqlite3_close(db);
+    return result;
+}
+
+bool notify_run(Command *self, const char *program_name, int argc, char **argv)
+{
+    bool result = true;
+    sqlite3 *db = NULL;
+    String_Builder sb = {0};
+
+    if (argc <= 0) {
+        fprintf(stderr, "Usage: %s %s %s\n", program_name, self->name, self->signature);
+        fprintf(stderr, "ERROR: expected title\n");
+        return_defer(false);
+    }
+
+    db = open_tore_db();
+    if (!db) return_defer(false);
+
+    for (bool pad = false; argc > 0; pad = true) {
+        if (pad) sb_append_cstr(&sb, " ");
+        sb_append_cstr(&sb, shift(argv, argc));
+    }
+    sb_append_null(&sb);
+    const char *title = sb.items;
+
+    if (!create_notification_with_title(db, title)) return_defer(false);
+    if (!show_active_notifications(db)) return_defer(false);
+
+defer:
+    sqlite3_close(db);
     free(sb.items);
     return result;
 }
 
+bool forget_run(Command *self, const char *program_name, int argc, char **argv)
+{
+    bool result = true;
+    sqlite3 *db = NULL;
+    if (argc <= 0) {
+        fprintf(stderr, "Usage: %s %s %s\n", program_name, self->name, self->signature);
+        fprintf(stderr, "ERROR: expected number\n");
+        return_defer(false);
+    }
+    db = open_tore_db();
+    if (!db) return_defer(false);
+    int number = atoi(shift(argv, argc));
+    if (!remove_reminder_by_number(db, number)) return_defer(false);
+    if (!show_active_reminders(db)) return_defer(false);
+defer:
+    if (db) sqlite3_close(db);
+    return result;
+}
+
+bool remind_run(Command *self, const char *program_name, int argc, char **argv)
+{
+    bool result = true;
+    sqlite3 *db = NULL;
+
+    if (argc <= 0) {
+        db = open_tore_db();
+        if (!db) return_defer(false);
+        if (!show_active_reminders(db)) return_defer(false);
+        return_defer(true);
+    }
+
+    const char *title = shift(argv, argc);
+    if (argc <= 0) {
+        fprintf(stderr, "Usage: %s %s %s\n", program_name, self->name, self->signature);
+        fprintf(stderr, "ERROR: expected scheduled_at\n");
+        return_defer(false);
+    }
+
+    // TODO: Allow the scheduled_at to be things like "today", "tomorrow", etc
+    // TODO: research if it's possible to enforce the date format on the level of sqlite3 contraints
+    const char *scheduled_at = shift(argv, argc);
+    if (!verify_date_format(scheduled_at)) {
+        fprintf(stderr, "ERROR: %s is not a valid date format\n", scheduled_at);
+        return_defer(false);
+    }
+
+    Period period = PERIOD_NONE;
+    unsigned long period_length = 0;
+    if (argc > 0) {
+        const char *unparsed_period = shift(argv, argc);
+        char *endptr = NULL;
+        period_length = strtoul(unparsed_period, &endptr, 10);
+        if (endptr == unparsed_period) {
+            fprintf(stderr, "ERROR: Invalid period `%s`. Expected something like\n", unparsed_period);
+            for (Period p = 0; p < COUNT_PERIODS; ++p) {
+                Period_Modifier *pm = &tore_period_modifiers[p];
+                size_t l = rand()%9 + 1;
+                fprintf(stderr, "    %lu%s - means every %lu %s\n", l, pm->modifier, l, pm->name);
+            }
+            return_defer(false);
+        }
+        unparsed_period = endptr;
+        period = period_by_tore_modifier(unparsed_period);
+        if (period == PERIOD_NONE) {
+            fprintf(stderr, "ERROR: Unknown period modifier `%s`. Expected modifiers are\n", unparsed_period);
+            for (Period p = 0; p < COUNT_PERIODS; ++p) {
+                Period_Modifier *pm = &tore_period_modifiers[p];
+                fprintf(stderr, "    %lu%s  - means every %lu %s\n", period_length, pm->modifier, period_length, pm->name);
+            }
+            return_defer(false);
+        }
+    }
+
+    db = open_tore_db();
+    if (!db) return_defer(false);
+    if (!create_new_reminder(db, title, scheduled_at, period, period_length)) return_defer(false);
+    if (!show_active_reminders(db)) return_defer(false);
+
+defer:
+    if (db) sqlite3_close(db);
+    return result;
+}
+
+bool expand_run(Command *self, const char *program_name, int argc, char **argv)
+{
+    bool result = true;
+    sqlite3 *db = open_tore_db();
+    if (!db) return_defer(false);
+    if (argc <= 0) {
+        fprintf(stderr, "Usage: %s %s %s\n", program_name, self->name, self->signature);
+        fprintf(stderr, "ERROR: no index is provided\n");
+        return_defer(false);
+    }
+    int index = atoi(shift(argv, argc));
+    if (!show_expanded_notifications_by_index(db, index)) return_defer(false);
+defer:
+    if (db) sqlite3_close(db);
+    return result;
+}
+
+bool help_run(Command *self, const char *program_name, int argc, char **argv);
+
+static Command commands[] = {
+    { 
+        .name = "version",
+        .description = "Show current version",
+        .signature = NULL,
+        .run = version_run,
+    },
+    {
+        .name = "help",
+        .description = "Show help messages for commands",
+        .signature = "[command-name]",
+        .run = help_run,
+    },
+    { 
+        .name = "checkout",
+        .description = "Fire off the reminders if needed and show the current notification",
+        .signature = NULL,
+        .run = checkout_run,
+    },
+    { 
+        .name = "dismiss",
+        .description = "Dismiss notifications by indices",
+        .signature = "<indices...>",
+        .run = dismiss_run,
+    },
+    { 
+        .name = "serve",
+        .description = "Start up the Web Server",
+        .signature = NULL,
+        .run = serve_run,
+    },
+    { 
+        .name = "notify",
+        .description = "Add a new notification manually",
+        .signature = "<title...>",
+        .run = notify_run,
+    },
+    { 
+        .name = "forget",
+        .description = "Remove a reminder by index",
+        .signature = "<number>",
+        .run = forget_run,
+    },
+    { 
+        .name = "remind",
+        .description = "Schedule a reminder",
+        .signature = "[<title> <scheduled_at> [period]]",
+        .run = remind_run,
+    },
+    { 
+        .name = "expand",
+        .description = "Expand a collapsed group of notifications by an index",
+        .signature = "<index>",
+        .run = expand_run,
+    },
+};
+
+bool help_run(Command *self, const char *program_name, int argc, char **argv)
+{
+    UNUSED(self);
+    const char *command_name = NULL;
+    if (argc > 0) command_name = shift(argv, argc);
+
+    if (command_name) {
+        for (size_t i = 0; i < ARRAY_LEN(commands); ++i) {
+            if (strcmp(commands[i].name, command_name) == 0) {
+                if (commands[i].signature) {
+                    printf("%s %s %s\n", program_name, commands[i].name, commands[i].signature);
+                } else {
+                    printf("%s %s\n", program_name, commands[i].name);
+                }
+                printf("    %s\n", commands[i].description);
+                return true;
+            }
+        }
+        fprintf(stderr, "ERROR: unknown command `%s`\n", command_name);
+        return false;
+    }
+
+    printf("Usage: %s <command> [command-arguments]\n", program_name);
+    printf("Commands:\n");
+    for (size_t i = 0; i < ARRAY_LEN(commands); ++i) {
+        if (commands[i].signature) {
+            printf("  %s %s %s\n", program_name, commands[i].name, commands[i].signature);
+        } else {
+            printf("  %s %s\n", program_name, commands[i].name);
+        }
+        printf("      %s\n", commands[i].description);
+    }
+    return true;
+}
+
+int main(int argc, char **argv)
+{
+    int result = 0;
+
+    srand(time(0));
+
+    const char *program_name = shift(argv, argc);
+    const char *command_name = "checkout";
+    if (argc > 0) command_name = shift(argv, argc);
+
+    for (size_t i = 0; i < ARRAY_LEN(commands); ++i) {
+        if (strcmp(commands[i].name, command_name) == 0) {
+            if (!commands[i].run(&commands[i], program_name, argc, argv)) return_defer(1);
+            return_defer(0);
+        }
+    }
+
+    fprintf(stderr, "ERROR: unknown command `%s`\n", command_name);
+    return_defer(1);
+
+defer:
+    return result;
+}
+
+// TODO: `undo` command
+// TODO: some way to turn Notification into a Reminder
 // TODO: start using Sqlite3 Transactions
 // - Wrap each command into a transaction
 // - Wrap each `serve` request into a transaction
