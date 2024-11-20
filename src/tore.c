@@ -12,6 +12,7 @@
 #include "nob.h"
 
 #define TORE_FILENAME ".tore"
+#define DEFAULT_COMMAND "checkout"
 
 #define LOG_SQLITE3_ERROR(db) fprintf(stderr, "%s:%d: SQLITE3 ERROR: %s\n", __FILE__, __LINE__, sqlite3_errmsg(db))
 
@@ -961,7 +962,7 @@ static Command commands[] = {
     {
         .name = "help",
         .description = "Show help messages for commands",
-        .signature = "[command-name]",
+        .signature = "[command]",
         .run = help_run,
     },
     { 
@@ -1030,7 +1031,8 @@ bool help_run(Command *self, const char *program_name, int argc, char **argv)
         return false;
     }
 
-    printf("Usage: %s <command> [command-arguments]\n", program_name);
+    printf("Usage: %s [command] [command-arguments]\n", program_name);
+    printf("The default command is `"DEFAULT_COMMAND"`\n");
     printf("Commands:\n");
     for (size_t i = 0; i < ARRAY_LEN(commands); ++i) {
         if (commands[i].signature) {
@@ -1050,7 +1052,7 @@ int main(int argc, char **argv)
     srand(time(0));
 
     const char *program_name = shift(argv, argc);
-    const char *command_name = "checkout";
+    const char *command_name = DEFAULT_COMMAND;
     if (argc > 0) command_name = shift(argv, argc);
 
     for (size_t i = 0; i < ARRAY_LEN(commands); ++i) {
