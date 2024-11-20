@@ -12,6 +12,9 @@
 #include "nob.h"
 
 #define TORE_FILENAME ".tore"
+#define STR(x) STR2_ELECTRIC_BOOGALOO(x)
+#define STR2_ELECTRIC_BOOGALOO(x) #x
+#define DEFAULT_SERVE_PORT 6969
 #define DEFAULT_COMMAND "checkout"
 
 #define LOG_SQLITE3_ERROR(db) fprintf(stderr, "%s:%d: SQLITE3 ERROR: %s\n", __FILE__, __LINE__, sqlite3_errmsg(db))
@@ -732,8 +735,16 @@ bool serve_run(Command *self, const char *program_name, int argc, char **argv)
     bool result = true;
     sqlite3 *db = open_tore_db();
     if (!db) return_defer(false);
+    // NOTE: We are intentionally not listening to the external addresses, because we are using a
+    // custom scuffed implementation of HTTP protocol, which is incomplete and possibly insecure.
+    // The `serve` command is meant to be used only locally by a single person. At least for now.
+    // We are doing it for the sake of simplicity, 'cause we don't have to ship an entire proper
+    // HTTP server. Though, if you really want to, you can always slap some reverse proxy like nginx
+    // on top of the `serve`. But you may want to grep the source code for `@txn` first, cause we
+    // are not even using any transactions when accessing the database KEKW.
     const char *addr = "127.0.0.1";
-    uint16_t port = 6969; // TODO: customize the port
+    uint16_t port = DEFAULT_SERVE_PORT;
+    if (argc > 0) port = atoi(shift(argv, argc));
 
     int server_fd = socket(AF_INET, SOCK_STREAM, 0);
     if (server_fd < 0) {
@@ -815,6 +826,7 @@ bool serve_run(Command *self, const char *program_name, int argc, char **argv)
     UNREACHABLE("serve");
 
 defer:
+    // TODO: properly close the sockets on defer
     if (db) sqlite3_close(db);
     return result;
 }
@@ -979,8 +991,8 @@ static Command commands[] = {
     },
     { 
         .name = "serve",
-        .description = "Start up the Web Server",
-        .signature = NULL,
+        .description = "Start up the Web Server. Default port is " STR(DEFAULT_SERVE_PORT) ".",
+        .signature = "[port]",
         .run = serve_run,
     },
     { 
@@ -1071,7 +1083,7 @@ defer:
 
 // TODO: `undo` command
 // TODO: some way to turn Notification into a Reminder
-// TODO: start using Sqlite3 Transactions
+// TODO: @txn: start using Sqlite3 Transactions
 // - Wrap each command into a transaction
 // - Wrap each `serve` request into a transaction
 // TODO: calendar output with the reminders
