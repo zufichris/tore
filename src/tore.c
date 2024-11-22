@@ -693,8 +693,18 @@ typedef struct Command {
     const char *name;
     const char *description;
     const char *signature;
+    const char *category;
     bool (*run)(struct Command *self, const char *program_name, int argc, char **argv);
 } Command;
+
+void command_describe(Command command, const char *program_name, int pad)
+{
+    printf("%*s%s %s", pad, "", program_name, command.name);
+    if (command.signature) printf(" %s", command.signature);
+    printf("\n");
+    if (command.description) printf("%*s    Description: %s\n", pad, "", command.description);
+    if (command.category)    printf("%*s    Category: %s\n", pad, "", command.category);
+}
 
 bool version_run(Command *self, const char *program_name, int argc, char **argv)
 {
@@ -702,7 +712,8 @@ bool version_run(Command *self, const char *program_name, int argc, char **argv)
     UNUSED(program_name);
     UNUSED(argc);
     UNUSED(argv);
-    fprintf(stderr, "GIT HASH: "GIT_HASH"\n");
+    fprintf(stderr, "TORE GIT HASH:     "GIT_HASH"\n");
+    fprintf(stderr, "SQLITE3 VERSION:   "SQLITE_VERSION"\n");
     return true;
 }
 
@@ -733,7 +744,8 @@ bool dismiss_run(Command *self, const char *program_name, int argc, char **argv)
     bool result = true;
     sqlite3 *db = NULL;
     if (argc <= 0) {
-        fprintf(stderr, "Usage: %s %s %s\n", program_name, self->name, self->signature);
+        fprintf(stderr, "Usage:\n");
+        command_describe(*self, program_name, 2);
         fprintf(stderr, "ERROR: expected indices\n");
         return_defer(false);
     }
@@ -869,7 +881,8 @@ bool notify_run(Command *self, const char *program_name, int argc, char **argv)
     String_Builder sb = {0};
 
     if (argc <= 0) {
-        fprintf(stderr, "Usage: %s %s %s\n", program_name, self->name, self->signature);
+        fprintf(stderr, "Usage:\n");
+        command_describe(*self, program_name, 2);
         fprintf(stderr, "ERROR: expected title\n");
         return_defer(false);
     }
@@ -902,8 +915,9 @@ bool forget_run(Command *self, const char *program_name, int argc, char **argv)
     bool result = true;
     sqlite3 *db = NULL;
     if (argc <= 0) {
-        fprintf(stderr, "Usage: %s %s %s\n", program_name, self->name, self->signature);
-        fprintf(stderr, "ERROR: expected number\n");
+        fprintf(stderr, "Usage:\n");
+        command_describe(*self, program_name, 2);
+        fprintf(stderr, "ERROR: expected index\n");
         return_defer(false);
     }
     db = open_tore_db();
@@ -935,7 +949,8 @@ bool remind_run(Command *self, const char *program_name, int argc, char **argv)
 
     const char *title = shift(argv, argc);
     if (argc <= 0) {
-        fprintf(stderr, "Usage: %s %s %s\n", program_name, self->name, self->signature);
+        fprintf(stderr, "Usage:\n");
+        command_describe(*self, program_name, 2);
         fprintf(stderr, "ERROR: expected scheduled_at\n");
         return_defer(false);
     }
@@ -996,7 +1011,8 @@ bool expand_run(Command *self, const char *program_name, int argc, char **argv)
     if (!db) return_defer(false);
     if (!txn_begin(db)) return_defer(false);
     if (argc <= 0) {
-        fprintf(stderr, "Usage: %s %s %s\n", program_name, self->name, self->signature);
+        fprintf(stderr, "Usage:\n");
+        command_describe(*self, program_name, 2);
         fprintf(stderr, "ERROR: no index is provided\n");
         return_defer(false);
     }
@@ -1014,58 +1030,67 @@ bool help_run(Command *self, const char *program_name, int argc, char **argv);
 
 static Command commands[] = {
     {
-        .name = "version",
-        .description = "Show current version",
-        .signature = NULL,
-        .run = version_run,
-    },
-    {
-        .name = "help",
-        .description = "Show help messages for commands",
-        .signature = "[command]",
-        .run = help_run,
-    },
-    {
         .name = "checkout",
         .description = "Fire off the reminders if needed and show the current notification",
         .signature = NULL,
+        .category = "Notifications",
         .run = checkout_run,
-    },
-    {
-        .name = "dismiss",
-        .description = "Dismiss notifications by indices",
-        .signature = "<indices...>",
-        .run = dismiss_run,
-    },
-    {
-        .name = "serve",
-        .description = "Start up the Web Server. Default port is " STR(DEFAULT_SERVE_PORT) ".",
-        .signature = "[port]",
-        .run = serve_run,
     },
     {
         .name = "notify",
         .description = "Add a new notification manually",
         .signature = "<title...>",
+        .category = "Notifications",
         .run = notify_run,
     },
     {
-        .name = "forget",
-        .description = "Remove a reminder by index",
-        .signature = "<number>",
-        .run = forget_run,
-    },
-    {
-        .name = "remind",
-        .description = "Schedule a reminder",
-        .signature = "[<title> <scheduled_at> [period]]",
-        .run = remind_run,
+        .name = "dismiss",
+        .description = "Dismiss notifications by indices",
+        .signature = "<indices...>",
+        .category = "Notifications",
+        .run = dismiss_run,
     },
     {
         .name = "expand",
         .description = "Expand a collapsed group of notifications by an index",
         .signature = "<index>",
+        .category = "Notifications",
         .run = expand_run,
+    },
+    {
+        .name = "remind",
+        .description = "Schedule a reminder",
+        .signature = "[<title> <scheduled_at> [period]]",
+        .category = "Reminders",
+        .run = remind_run,
+    },
+    {
+        .name = "forget",
+        .description = "Remove a reminder by index",
+        .signature = "<index>",
+        .category = "Reminders",
+        .run = forget_run,
+    },
+    {
+        .name = "serve",
+        .description = "Start up the Web Server. Default port is " STR(DEFAULT_SERVE_PORT) ".",
+        .signature = "[port]",
+        .category = "Web",
+        .run = serve_run,
+    },
+    {
+        .name = "help",
+        .description = "Show help messages for commands",
+        .signature = "[command]",
+        .category = "Info",
+        .run = help_run,
+    },
+    {
+        .name = "version",
+        .description = "Show current version",
+        .signature = NULL,
+        .category = "Info",
+        .run = version_run,
     },
 };
 
@@ -1078,12 +1103,7 @@ bool help_run(Command *self, const char *program_name, int argc, char **argv)
     if (command_name) {
         for (size_t i = 0; i < ARRAY_LEN(commands); ++i) {
             if (strcmp(commands[i].name, command_name) == 0) {
-                if (commands[i].signature) {
-                    printf("%s %s %s\n", program_name, commands[i].name, commands[i].signature);
-                } else {
-                    printf("%s %s\n", program_name, commands[i].name);
-                }
-                printf("    %s\n", commands[i].description);
+                command_describe(commands[i], program_name, 0);
                 return true;
             }
         }
@@ -1091,17 +1111,15 @@ bool help_run(Command *self, const char *program_name, int argc, char **argv)
         return false;
     }
 
-    printf("Usage: %s [command] [command-arguments]\n", program_name);
-    printf("The default command is `"DEFAULT_COMMAND"`\n");
+    printf("Usage:\n");
+    printf("  %s [command] [command-arguments]\n", program_name);
+    printf("\n");
     printf("Commands:\n");
     for (size_t i = 0; i < ARRAY_LEN(commands); ++i) {
-        if (commands[i].signature) {
-            printf("  %s %s %s\n", program_name, commands[i].name, commands[i].signature);
-        } else {
-            printf("  %s %s\n", program_name, commands[i].name);
-        }
-        printf("      %s\n", commands[i].description);
+        command_describe(commands[i], program_name, 2);
+        printf("\n");
     }
+    printf("The default command is `"DEFAULT_COMMAND"`.\n");
     return true;
 }
 
