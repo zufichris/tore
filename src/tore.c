@@ -19,6 +19,24 @@
 
 #define LOG_SQLITE3_ERROR(db) fprintf(stderr, "%s:%d: SQLITE3 ERROR: %s\n", __FILE__, __LINE__, sqlite3_errmsg(db))
 
+bool txn_begin(sqlite3 *db)
+{
+    if (sqlite3_exec(db, "BEGIN;", NULL, NULL, NULL) != SQLITE_OK) {
+        LOG_SQLITE3_ERROR(db);
+        return false;
+    }
+    return true;
+}
+
+bool txn_commit(sqlite3 *db)
+{
+    if (sqlite3_exec(db, "COMMIT;", NULL, NULL, NULL) != SQLITE_OK) {
+        LOG_SQLITE3_ERROR(db);
+        return false;
+    }
+    return true;
+}
+
 const char *migrations[] = {
     // Initial scheme
     "CREATE TABLE IF NOT EXISTS Notifications (\n"
@@ -56,6 +74,7 @@ bool create_schema(sqlite3 *db, const char *tore_path)
 {
     bool result = true;
     sqlite3_stmt *stmt = NULL;
+    if (!txn_begin(db)) return_defer(false);
     const char *sql =
         "CREATE TABLE IF NOT EXISTS Migrations (\n"
         "    applied_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,\n"
@@ -126,6 +145,7 @@ bool create_schema(sqlite3 *db, const char *tore_path)
 
 defer:
     if (stmt) sqlite3_finalize(stmt);
+    if (result) result = txn_commit(db);
     return result;
 }
 
@@ -695,12 +715,16 @@ bool checkout_run(Command *self, const char *program_name, int argc, char **argv
     bool result = true;
     sqlite3 *db = open_tore_db();
     if (!db) return_defer(false);
+    if (!txn_begin(db)) return_defer(false);
     if (!fire_off_reminders(db)) return_defer(false);
     if (!show_active_notifications(db)) return_defer(false);
     // TODO: show reminders that are about to fire off
     //   Maybe they should fire off a "warning" notification before doing the main one?
 defer:
-    if (db) sqlite3_close(db);
+    if (db) {
+        if (result) result = txn_commit(db);
+        sqlite3_close(db);
+    }
     return result;
 }
 
@@ -716,13 +740,17 @@ bool dismiss_run(Command *self, const char *program_name, int argc, char **argv)
 
     db = open_tore_db();
     if (!db) return_defer(false);
+    if (!txn_begin(db)) return_defer(false);
 
     int how_many_dismissed = 0;
     if (!dismiss_grouped_notifications_by_indices_from_args(db, &how_many_dismissed, argc, argv)) return_defer(false);
     if (!show_active_notifications(db)) return_defer(false);
     printf("Dismissed %d notifications\n", how_many_dismissed);
 defer:
-    if (db) sqlite3_close(db);
+    if (db) {
+        if (result) result = txn_commit(db);
+        sqlite3_close(db);
+    }
     return result;
 }
 
@@ -740,8 +768,7 @@ bool serve_run(Command *self, const char *program_name, int argc, char **argv)
     // The `serve` command is meant to be used only locally by a single person. At least for now.
     // We are doing it for the sake of simplicity, 'cause we don't have to ship an entire proper
     // HTTP server. Though, if you really want to, you can always slap some reverse proxy like nginx
-    // on top of the `serve`. But you may want to grep the source code for `@txn` first, cause we
-    // are not even using any transactions when accessing the database KEKW.
+    // on top of the `serve`.
     const char *addr = "127.0.0.1";
     uint16_t port = DEFAULT_SERVE_PORT;
     if (argc > 0) port = atoi(shift(argv, argc));
@@ -789,6 +816,8 @@ bool serve_run(Command *self, const char *program_name, int argc, char **argv)
             return_defer(false);
         }
 
+        if (!txn_begin(db)) return_defer(false);
+
         if (!load_active_grouped_notifications(db, &notifs)) return_defer(false);
         if (!load_active_reminders(db, &reminders)) return_defer(false);
         render_index_page(&body, notifs, reminders);
@@ -812,6 +841,8 @@ bool serve_run(Command *self, const char *program_name, int argc, char **argv)
         }
 
         close(client_fd);
+
+        if (!txn_commit(db)) return_defer(false);
 
         notifs.count = 0;
         reminders.count = 0;
@@ -845,6 +876,7 @@ bool notify_run(Command *self, const char *program_name, int argc, char **argv)
 
     db = open_tore_db();
     if (!db) return_defer(false);
+    if (!txn_begin(db)) return_defer(false);
 
     for (bool pad = false; argc > 0; pad = true) {
         if (pad) sb_append_cstr(&sb, " ");
@@ -857,7 +889,10 @@ bool notify_run(Command *self, const char *program_name, int argc, char **argv)
     if (!show_active_notifications(db)) return_defer(false);
 
 defer:
-    sqlite3_close(db);
+    if (db) {
+        if (result) result = txn_commit(db);
+        sqlite3_close(db);
+    }
     free(sb.items);
     return result;
 }
@@ -873,11 +908,15 @@ bool forget_run(Command *self, const char *program_name, int argc, char **argv)
     }
     db = open_tore_db();
     if (!db) return_defer(false);
+    if (!txn_begin(db)) return_defer(false);
     int number = atoi(shift(argv, argc));
     if (!remove_reminder_by_number(db, number)) return_defer(false);
     if (!show_active_reminders(db)) return_defer(false);
 defer:
-    if (db) sqlite3_close(db);
+    if (db) {
+        if (result) result = txn_commit(db);
+        sqlite3_close(db);
+    }
     return result;
 }
 
@@ -889,6 +928,7 @@ bool remind_run(Command *self, const char *program_name, int argc, char **argv)
     if (argc <= 0) {
         db = open_tore_db();
         if (!db) return_defer(false);
+        if (!txn_begin(db)) return_defer(false);
         if (!show_active_reminders(db)) return_defer(false);
         return_defer(true);
     }
@@ -937,11 +977,15 @@ bool remind_run(Command *self, const char *program_name, int argc, char **argv)
 
     db = open_tore_db();
     if (!db) return_defer(false);
+    if (!txn_begin(db)) return_defer(false);
     if (!create_new_reminder(db, title, scheduled_at, period, period_length)) return_defer(false);
     if (!show_active_reminders(db)) return_defer(false);
 
 defer:
-    if (db) sqlite3_close(db);
+    if (db) {
+        if (result) result = txn_commit(db);
+        sqlite3_close(db);
+    }
     return result;
 }
 
@@ -950,6 +994,7 @@ bool expand_run(Command *self, const char *program_name, int argc, char **argv)
     bool result = true;
     sqlite3 *db = open_tore_db();
     if (!db) return_defer(false);
+    if (!txn_begin(db)) return_defer(false);
     if (argc <= 0) {
         fprintf(stderr, "Usage: %s %s %s\n", program_name, self->name, self->signature);
         fprintf(stderr, "ERROR: no index is provided\n");
@@ -958,14 +1003,17 @@ bool expand_run(Command *self, const char *program_name, int argc, char **argv)
     int index = atoi(shift(argv, argc));
     if (!show_expanded_notifications_by_index(db, index)) return_defer(false);
 defer:
-    if (db) sqlite3_close(db);
+    if (db) {
+        if (result) result = txn_commit(db);
+        sqlite3_close(db);
+    }
     return result;
 }
 
 bool help_run(Command *self, const char *program_name, int argc, char **argv);
 
 static Command commands[] = {
-    { 
+    {
         .name = "version",
         .description = "Show current version",
         .signature = NULL,
@@ -977,43 +1025,43 @@ static Command commands[] = {
         .signature = "[command]",
         .run = help_run,
     },
-    { 
+    {
         .name = "checkout",
         .description = "Fire off the reminders if needed and show the current notification",
         .signature = NULL,
         .run = checkout_run,
     },
-    { 
+    {
         .name = "dismiss",
         .description = "Dismiss notifications by indices",
         .signature = "<indices...>",
         .run = dismiss_run,
     },
-    { 
+    {
         .name = "serve",
         .description = "Start up the Web Server. Default port is " STR(DEFAULT_SERVE_PORT) ".",
         .signature = "[port]",
         .run = serve_run,
     },
-    { 
+    {
         .name = "notify",
         .description = "Add a new notification manually",
         .signature = "<title...>",
         .run = notify_run,
     },
-    { 
+    {
         .name = "forget",
         .description = "Remove a reminder by index",
         .signature = "<number>",
         .run = forget_run,
     },
-    { 
+    {
         .name = "remind",
         .description = "Schedule a reminder",
         .signature = "[<title> <scheduled_at> [period]]",
         .run = remind_run,
     },
-    { 
+    {
         .name = "expand",
         .description = "Expand a collapsed group of notifications by an index",
         .signature = "<index>",
@@ -1083,7 +1131,4 @@ defer:
 
 // TODO: `undo` command
 // TODO: some way to turn Notification into a Reminder
-// TODO: @txn: start using Sqlite3 Transactions
-// - Wrap each command into a transaction
-// - Wrap each `serve` request into a transaction
 // TODO: calendar output with the reminders
