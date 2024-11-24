@@ -277,15 +277,10 @@ defer:
     return result;
 }
 
-bool show_active_notifications(sqlite3 *db)
+void display_grouped_notifications(Grouped_Notifications gns)
 {
-    bool result = true;
-
-    Grouped_Notifications notifs = {0};
-    if (!load_active_grouped_notifications(db, &notifs)) return_defer(false);
-
-    for (size_t i = 0; i < notifs.count; ++i) {
-        Grouped_Notification *it = &notifs.items[i];
+    for (size_t i = 0; i < gns.count; ++i) {
+        Grouped_Notification *it = &gns.items[i];
         assert(it->group_count > 0);
         if (it->group_count == 1) {
             printf("%zu: %s (%s)\n", i, it->title, it->created_at);
@@ -293,9 +288,18 @@ bool show_active_notifications(sqlite3 *db)
             printf("%zu: [%d] %s (%s)\n", i, it->group_count, it->title, it->created_at);
         }
     }
+}
+
+bool show_active_notifications(sqlite3 *db)
+{
+    bool result = true;
+    Grouped_Notifications gns = {0};
+
+    if (!load_active_grouped_notifications(db, &gns)) return_defer(false);
+    display_grouped_notifications(gns);
 
 defer:
-    free(notifs.items);
+    free(gns.items);
     return result;
 }
 
@@ -697,12 +701,33 @@ typedef struct Command {
     bool (*run)(struct Command *self, const char *program_name, int argc, char **argv);
 } Command;
 
-void command_describe(Command command, const char *program_name, int pad)
+typedef enum {
+    DESCRIPTION_SHORT,
+    DESCRIPTION_FULL,
+} Description_Type;
+
+void command_describe(Command command, const char *program_name, int pad, Description_Type description_type)
 {
     printf("%*s%s %s", pad, "", program_name, command.name);
     if (command.signature) printf(" %s", command.signature);
     printf("\n");
-    if (command.description) printf("%*s    Description: %s\n", pad, "", command.description);
+    if (command.description) {
+        switch (description_type) {
+        case DESCRIPTION_SHORT: {
+            String_View description = sv_from_cstr(command.description);
+            String_View short_description = sv_chop_by_delim(&description, '\n');
+            printf("%*s    "SV_Fmt"\n", pad, "", SV_Arg(short_description));
+        } break;
+        case DESCRIPTION_FULL: {
+            String_View description = sv_from_cstr(command.description);
+            while (description.count > 0) {
+                String_View line = sv_chop_by_delim(&description, '\n');
+                printf("%*s    "SV_Fmt"\n", pad, "", SV_Arg(line));
+            }
+        } break;
+        default: UNREACHABLE("description_type");
+        }
+    }
     if (command.category)    printf("%*s    Category: %s\n", pad, "", command.category);
 }
 
@@ -745,7 +770,7 @@ bool dismiss_run(Command *self, const char *program_name, int argc, char **argv)
     sqlite3 *db = NULL;
     if (argc <= 0) {
         fprintf(stderr, "Usage:\n");
-        command_describe(*self, program_name, 2);
+        command_describe(*self, program_name, 2, DESCRIPTION_SHORT);
         fprintf(stderr, "ERROR: expected indices\n");
         return_defer(false);
     }
@@ -882,7 +907,7 @@ bool notify_run(Command *self, const char *program_name, int argc, char **argv)
 
     if (argc <= 0) {
         fprintf(stderr, "Usage:\n");
-        command_describe(*self, program_name, 2);
+        command_describe(*self, program_name, 2, DESCRIPTION_SHORT);
         fprintf(stderr, "ERROR: expected title\n");
         return_defer(false);
     }
@@ -916,7 +941,7 @@ bool forget_run(Command *self, const char *program_name, int argc, char **argv)
     sqlite3 *db = NULL;
     if (argc <= 0) {
         fprintf(stderr, "Usage:\n");
-        command_describe(*self, program_name, 2);
+        command_describe(*self, program_name, 2, DESCRIPTION_SHORT);
         fprintf(stderr, "ERROR: expected index\n");
         return_defer(false);
     }
@@ -950,7 +975,7 @@ bool remind_run(Command *self, const char *program_name, int argc, char **argv)
     const char *title = shift(argv, argc);
     if (argc <= 0) {
         fprintf(stderr, "Usage:\n");
-        command_describe(*self, program_name, 2);
+        command_describe(*self, program_name, 2, DESCRIPTION_SHORT);
         fprintf(stderr, "ERROR: expected scheduled_at\n");
         return_defer(false);
     }
@@ -1012,7 +1037,7 @@ bool expand_run(Command *self, const char *program_name, int argc, char **argv)
     if (!txn_begin(db)) return_defer(false);
     if (argc <= 0) {
         fprintf(stderr, "Usage:\n");
-        command_describe(*self, program_name, 2);
+        command_describe(*self, program_name, 2, DESCRIPTION_SHORT);
         fprintf(stderr, "ERROR: no index is provided\n");
         return_defer(false);
     }
@@ -1031,64 +1056,70 @@ bool help_run(Command *self, const char *program_name, int argc, char **argv);
 static Command commands[] = {
     {
         .name = "checkout",
-        .description = "Fire off the reminders if needed and show the current notification",
         .signature = NULL,
+        .description = "Fire off the Reminders if needed and show the current Notifications\n"
+            "This is a default command that is executed when you just call Tore by itself.",
         .category = "Notifications",
         .run = checkout_run,
     },
     {
         .name = "notify",
-        .description = "Add a new notification manually",
         .signature = "<title...>",
+        .description = "Add a new Notification manually.\n"
+            "This Notification is not associated with any specific Reminder. You just create\n"
+            "it in the moment to not forget something within the same day.",
         .category = "Notifications",
         .run = notify_run,
     },
     {
         .name = "dismiss",
-        .description = "Dismiss notifications by indices",
         .signature = "<indices...>",
+        .description = "Dismiss notifications by specified indices.",
         .category = "Notifications",
         .run = dismiss_run,
     },
     {
         .name = "expand",
-        .description = "Expand a collapsed group of notifications by an index",
         .signature = "<index>",
+        .description = "Expand a collapsed Group of Notifications by its index.\n"
+            "When you have several undismissed Notifications generated by the same recurring\n"
+            "Reminder they are usually collapsed into one in all the Notifications lists.\n"
+            "To view the exact Notifications in the collapsed Group you can use this command.",
         .category = "Notifications",
         .run = expand_run,
     },
     {
         .name = "remind",
-        .description = "Schedule a reminder",
         .signature = "[<title> <scheduled_at> [period]]",
+        .description = "Schedule a reminder",
         .category = "Reminders",
         .run = remind_run,
     },
     {
         .name = "forget",
-        .description = "Remove a reminder by index",
         .signature = "<index>",
+        .description = "Remove a reminder by index",
         .category = "Reminders",
         .run = forget_run,
     },
     {
         .name = "serve",
-        .description = "Start up the Web Server. Default port is " STR(DEFAULT_SERVE_PORT) ".",
         .signature = "[port]",
+        .description = "Start up the Web Server. Default port is " STR(DEFAULT_SERVE_PORT) ".",
         .category = "Web",
         .run = serve_run,
     },
     {
         .name = "help",
-        .description = "Show help messages for commands",
         .signature = "[command]",
+        .description = "Show help messages for commands",
         .category = "Info",
         .run = help_run,
     },
     {
         .name = "version",
-        .description = "Show current version",
         .signature = NULL,
+        .description = "Show current version",
         .category = "Info",
         .run = version_run,
     },
@@ -1103,7 +1134,7 @@ bool help_run(Command *self, const char *program_name, int argc, char **argv)
     if (command_name) {
         for (size_t i = 0; i < ARRAY_LEN(commands); ++i) {
             if (strcmp(commands[i].name, command_name) == 0) {
-                command_describe(commands[i], program_name, 0);
+                command_describe(commands[i], program_name, 0, DESCRIPTION_FULL);
                 return true;
             }
         }
@@ -1116,7 +1147,7 @@ bool help_run(Command *self, const char *program_name, int argc, char **argv)
     printf("\n");
     printf("Commands:\n");
     for (size_t i = 0; i < ARRAY_LEN(commands); ++i) {
-        command_describe(commands[i], program_name, 2);
+        command_describe(commands[i], program_name, 2, DESCRIPTION_SHORT);
         printf("\n");
     }
     printf("The default command is `"DEFAULT_COMMAND"`.\n");
