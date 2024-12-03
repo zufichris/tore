@@ -108,6 +108,87 @@ bool compile_template(Cmd *cmd, const char *src_path, const char *dst_path)
     return true;
 }
 
+typedef struct {
+    const char *file_path;
+    size_t offset;
+    size_t size;
+} Resource;
+
+Resource resources[] = {
+    { .file_path = "./resources/images/tore.png" },
+};
+
+#define genf(out, ...) \
+    do { \
+        fprintf((out), __VA_ARGS__); \
+        fprintf((out), " // %s:%d\n", __FILE__, __LINE__); \
+    } while(0)
+
+
+bool generate_resource_bundle(void)
+{
+    bool result = true;
+    Nob_String_Builder bundle = {0};
+    Nob_String_Builder content = {0};
+    FILE *out = NULL;
+
+    // bundle  = [aaaaaaaaabbbbb]
+    //            ^        ^
+    // content = []
+    // 0, 9
+
+    for (size_t i = 0; i < NOB_ARRAY_LEN(resources); ++i) {
+        content.count = 0;
+        if (!nob_read_entire_file(resources[i].file_path, &content)) nob_return_defer(false);
+        resources[i].offset = bundle.count;
+        resources[i].size = content.count;
+        nob_da_append_many(&bundle, content.items, content.count);
+        nob_da_append(&bundle, 0);
+    }
+
+    const char *bundle_h_path = BUILD_FOLDER"bundle.h";
+    out = fopen(bundle_h_path, "wb");
+    if (out == NULL) {
+        nob_log(NOB_ERROR, "Could not open file %s for writing: %s", bundle_h_path, strerror(errno));
+        nob_return_defer(false);
+    }
+
+    genf(out, "#ifndef BUNDLE_H_");
+    genf(out, "#define BUNDLE_H_");
+    genf(out, "typedef struct {");
+    genf(out, "    const char *file_path;");
+    genf(out, "    size_t offset;");
+    genf(out, "    size_t size;");
+    genf(out, "} Resource;");
+    genf(out, "size_t resources_count = %zu;", NOB_ARRAY_LEN(resources));
+    genf(out, "Resource resources[] = {");
+    for (size_t i = 0; i < NOB_ARRAY_LEN(resources); ++i) {
+        genf(out, "    {.file_path = \"%s\", .offset = %zu, .size = %zu},",
+             resources[i].file_path, resources[i].offset, resources[i].size);
+    }
+    genf(out, "};");
+
+    genf(out, "unsigned char bundle[] = {");
+    size_t row_size = 20;
+    for (size_t i = 0; i < bundle.count; ) {
+        fprintf(out, "     ");
+        for (size_t col = 0; col < row_size && i < bundle.count; ++col, ++i) {
+            fprintf(out, "0x%02X, ", (unsigned char)bundle.items[i]);
+        }
+        genf(out, "");
+    }
+    genf(out, "};");
+    genf(out, "#endif // BUNDLE_H_");
+
+    nob_log(NOB_INFO, "Generated %s", bundle_h_path);
+
+defer:
+    if (out) fclose(out);
+    free(content.items);
+    free(bundle.items);
+    return result;
+}
+
 int main(int argc, char **argv)
 {
     NOB_GO_REBUILD_URSELF_PLUS(argc, argv, "./src_build/flags.c");
@@ -125,15 +206,16 @@ int main(int argc, char **argv)
     if (!nob_mkdir_if_not_exists(BUILD_FOLDER)) return 1;
     if (!build_sqlite3(&cmd)) return 1;
 
-    // Templates
+    // Templates 
     builder_compiler(&cmd);
     builder_common_flags(&cmd);
     builder_output(&cmd, BUILD_FOLDER"tt");
     builder_inputs(&cmd, SRC_BUILD_FOLDER"tt.c");
     if (!cmd_run_sync_and_reset(&cmd)) return 1;
-
     if (!compile_template(&cmd, SRC_FOLDER"index_page.h.tt", BUILD_FOLDER"index_page.h")) return 1;
     if (!compile_template(&cmd, SRC_FOLDER"error_page.h.tt", BUILD_FOLDER"error_page.h")) return 1;
+
+    if (!generate_resource_bundle()) return 1;
 
     char *git_hash = get_git_hash(&cmd);
     builder_compiler(&cmd);
@@ -170,6 +252,14 @@ int main(int argc, char **argv)
         if (strcmp(command_name, "chroot") == 0) {
             nob_log(WARNING, "`chroot` command name is deprecated, just call it as `run`");
         }
+        return 0;
+    }
+
+    if (strcmp(command_name, "svg") == 0) {
+        cmd_append(&cmd, "convert", 
+                "-background", "None", "./assets/images/tore.svg",
+                "-resize", "32x32", "./assets/images/tore.png");
+        if (!cmd_run_sync_and_reset(&cmd)) return 1;
         return 0;
     }
 

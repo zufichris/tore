@@ -11,6 +11,8 @@
 #define NOB_STRIP_PREFIX
 #include "nob.h"
 
+#include "bundle.h"
+
 #define TORE_FILENAME ".tore"
 #define STR(x) STR2_ELECTRIC_BOOGALOO(x)
 #define STR2_ELECTRIC_BOOGALOO(x) #x
@@ -819,6 +821,15 @@ void sc_reset(Serve_Context *sc)
     sc->request.count = 0;
 }
 
+Resource *find_resource(const char *file_path)
+{
+    for (size_t i = 0; i < resources_count; ++i) {
+        if (strcmp(file_path, resources[i].file_path) == 0) {
+            return &resources[i];
+        }
+    }
+    return NULL;
+}
 
 void serve_request(Serve_Context *sc, int client_fd)
 {
@@ -850,7 +861,6 @@ void serve_request(Serve_Context *sc, int client_fd)
     UNUSED(method);
     String_View uri =  sv_trim(sv_chop_by_delim(&status_line, ' '));
 
-    // TODO: serve favicon
     if (sv_eq(uri, sv_from_cstr("/"))) {
         if (!load_active_grouped_notifications(sc->db, &sc->notifs)) return;
         if (!load_active_reminders(sc->db, &sc->reminders)) return;
@@ -862,6 +872,26 @@ void serve_request(Serve_Context *sc, int client_fd)
         sb_append_cstr(&sc->response, "Connection: close\r\n");
         sb_append_cstr(&sc->response, "\r\n");
         sb_append_buf(&sc->response, sc->body.items, sc->body.count);
+    } else if (sv_eq(uri, sv_from_cstr("/favicon.ico"))) {
+        Resource *favicon = find_resource("./resources/images/tore.png");
+        if (favicon) {
+            sb_append_buf(&sc->body, &bundle[favicon->offset], favicon->size);
+            sb_append_cstr(&sc->response, "HTTP/1.0 200 OK\r\n");
+            sb_append_cstr(&sc->response, "Content-Type: image/png\r\n");
+            sb_append_cstr(&sc->response, temp_sprintf("Content-Length: %zu\r\n", sc->body.count));
+            sb_append_cstr(&sc->response, "Connection: close\r\n");
+            sb_append_cstr(&sc->response, "\r\n");
+            sb_append_buf(&sc->response, sc->body.items, sc->body.count);
+        } else {
+            render_error_page(&sc->body, 404, "Not Found");
+
+            sb_append_cstr(&sc->response, "HTTP/1.0 404 Not Found\r\n");
+            sb_append_cstr(&sc->response, "Content-Type: text/html\r\n");
+            sb_append_cstr(&sc->response, temp_sprintf("Content-Length: %zu\r\n", sc->body.count));
+            sb_append_cstr(&sc->response, "Connection: close\r\n");
+            sb_append_cstr(&sc->response, "\r\n");
+            sb_append_buf(&sc->response, sc->body.items, sc->body.count);
+        }
     } else if (sv_eq(uri, sv_from_cstr("/urmom"))) {
         render_error_page(&sc->body, 413, "Request Entity Too Large");
 
