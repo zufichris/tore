@@ -145,9 +145,7 @@
           if (!cmd_run_sync(cmd)) return 1;
           return 0;
       }
-      ```
-
-      Not all the names have strippable prefixes. All the redefinable names like `NOB_GO_REBUILD_URSELF`
+      ```strippable prefixes. All the redefinable names like `NOB_GO_REBUILD_URSELF`
       for instance will retain their prefix even if NOB_STRIP_PREFIX is enabled. Notable exception is the
       nob_log() function. Stripping away the prefix results in log() which was historically always referring
       to the natural logarithmic function that is already defined in math.h. So there is no reason to strip
@@ -289,11 +287,13 @@ bool nob_delete_file(const char *path);
         (da)->count += (new_items_count);                                                     \
     } while (0)
 
+
 typedef struct {
     char *items;
     size_t count;
     size_t capacity;
 } Nob_String_Builder;
+
 
 bool nob_read_entire_file(const char *path, Nob_String_Builder *sb);
 
@@ -306,7 +306,7 @@ bool nob_read_entire_file(const char *path, Nob_String_Builder *sb);
         const char *s = (cstr);       \
         size_t n = strlen(s);         \
         nob_da_append_many(sb, s, n); \
-    } while (0)
+    }  while (0)
 
 // Append a single NULL character at the end of a string builder. So then you can
 // use it a NULL-terminated C string

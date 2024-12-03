@@ -4,8 +4,8 @@ typedef struct {
     bool value;
 } Flag;
 
-void parse_flags(int *argc, char ***argv, Flag *flags, size_t flags_count)
-{
+
+void parse_flags(int *argc, char ***argv, Flag *flags, size_t flags_count){
 next_flag:
     while (*argc > 0) {
         for (size_t i = 0; i < flags_count; ++i) {
@@ -19,8 +19,7 @@ next_flag:
     }
 }
 
-void print_flags(Flag *flags, size_t flags_count)
-{
+void print_flags(Flag *flags, size_t flags_count){
     int max_width = INT_MIN;
     for (size_t i = 0; i < flags_count; ++i) {
         int width = strlen(flags[i].name);

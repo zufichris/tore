@@ -26,8 +26,9 @@ static Flag build_flags[COUNT_BUILD_FLAGS] = {
 #define SQLITE3_OBJ_PATH (build_flags[BF_ASAN].value ? BUILD_FOLDER"sqlite3-asan.o" : BUILD_FOLDER"sqlite3.o")
 
 #define builder_compiler(cmd) cmd_append(cmd, "clang")
-void builder_common_flags(Cmd *cmd)
-{
+
+
+void builder_common_flags(Cmd *cmd){
     if (build_flags[BF_ASAN].value) cmd_append(cmd, "-fsanitize=address");
     cmd_append(cmd,
             "-Wall",
@@ -41,8 +42,7 @@ void builder_common_flags(Cmd *cmd)
 #define builder_output(cmd, output_path) cmd_append(cmd, "-o", (output_path))
 #define builder_inputs(cmd, ...) cmd_append(cmd, __VA_ARGS__)
 
-bool build_sqlite3(Nob_Cmd *cmd)
-{
+bool build_sqlite3(Nob_Cmd *cmd){
     const char *output_path = SQLITE3_OBJ_PATH;
     const char *input_path = SRC_FOLDER"sqlite-amalgamation-3460100/sqlite3.c";
     int rebuild_is_needed = nob_needs_rebuild1(output_path, input_path);
