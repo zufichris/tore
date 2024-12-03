@@ -666,6 +666,16 @@ void render_index_page(String_Builder *sb, Grouped_Notifications notifs, Reminde
 #undef ESCAPED_OUT
 }
 
+void render_error_page(String_Builder *sb, int error_code, const char *error_name)
+{
+#define OUT(buf, size) sb_append_buf(sb, buf, size)
+#define ERROR_CODE sb_append_cstr(sb, temp_sprintf("%d", error_code));
+#define ERROR_NAME sb_append_cstr(sb, error_name);
+#include "error_page.h"
+#undef ERROR_CODE
+#undef ERROR_NAME
+}
+
 sqlite3 *open_tore_db(void)
 {
     sqlite3 *result = NULL;
@@ -791,6 +801,89 @@ defer:
     return result;
 }
 
+typedef struct {
+    sqlite3 *db;
+    Grouped_Notifications notifs;
+    Reminders reminders;
+    String_Builder request;
+    String_Builder response;
+    String_Builder body;
+} Serve_Context;
+
+void sc_reset(Serve_Context *sc)
+{
+    sc->notifs.count = 0;
+    sc->reminders.count = 0;
+    sc->body.count = 0;
+    sc->response.count = 0;
+    sc->request.count = 0;
+}
+
+// <Status-Line>\r\n<Header>\r\n<Header>\r\n<Header>\r\n<Header>\r\n<Header>\r\n\r\n
+
+void serve_request(Serve_Context *sc, int client_fd)
+{
+    // TODO: log queries
+
+    char buffer[1024];
+    size_t cur = 0;
+    String_View suffix = sv_from_parts("\r\n\r\n", 4);
+    bool finish = false;
+    ssize_t n = 0;
+    do {
+        n = read(client_fd, buffer, sizeof(buffer));
+        if (n <= 0) break;
+        sb_append_buf(&sc->request, buffer, n);
+        for (; cur < sc->request.count && !finish; cur += 1) {
+            finish = nob_sv_starts_with(sv_from_parts(sc->request.items + cur, sc->request.count - cur), suffix);
+        }
+    } while (!finish);
+
+    if (n < 0) {
+        fprintf(stderr, "ERROR: could not read request: %s", strerror(errno));
+        return;
+    }
+
+    String_View request = sb_to_sv(sc->request);
+    String_View status_line = sv_trim(sv_chop_by_delim(&request, '\n'));
+    String_View method = sv_trim(sv_chop_by_delim(&status_line, ' '));
+    UNUSED(method);
+    String_View uri =  sv_trim(sv_chop_by_delim(&status_line, ' '));
+
+    if (sv_eq(uri, sv_from_cstr("/"))) {
+        if (!load_active_grouped_notifications(sc->db, &sc->notifs)) return;
+        if (!load_active_reminders(sc->db, &sc->reminders)) return;
+        render_index_page(&sc->body, sc->notifs, sc->reminders);
+
+        sb_append_cstr(&sc->response, "HTTP/1.0 200\r\n");
+        sb_append_cstr(&sc->response, "Content-Type: text/html\r\n");
+        sb_append_cstr(&sc->response, temp_sprintf("Content-Length: %zu\r\n", sc->body.count));
+        sb_append_cstr(&sc->response, "Connection: close\r\n");
+        sb_append_cstr(&sc->response, "\r\n");
+        sb_append_buf(&sc->response, sc->body.items, sc->body.count);
+    } else if (sv_eq(uri, sv_from_cstr("/urmom"))) {
+        render_error_page(&sc->body, 413, "Request Entity Too Large");
+
+        sb_append_cstr(&sc->response, "HTTP/1.0 413 Request Entity Too Large\r\n");
+        sb_append_cstr(&sc->response, "Content-Type: text/html\r\n");
+        sb_append_cstr(&sc->response, temp_sprintf("Content-Length: %zu\r\n", sc->body.count));
+        sb_append_cstr(&sc->response, "Connection: close\r\n");
+        sb_append_cstr(&sc->response, "\r\n");
+        sb_append_buf(&sc->response, sc->body.items, sc->body.count);
+    }
+
+    String_View untransfered = sb_to_sv(sc->response);
+    while (untransfered.count > 0) {
+        ssize_t transfered = write(client_fd, untransfered.data, untransfered.count);
+        if (transfered < 0) {
+            fprintf(stderr, "ERROR: Could not write response: %s\n", strerror(errno));
+            return;
+        }
+        untransfered.data += transfered;
+        untransfered.count -= transfered;
+    }
+}
+
 bool serve_run(Command *self, const char *program_name, int argc, char **argv)
 {
     UNUSED(self);
@@ -839,52 +932,26 @@ bool serve_run(Command *self, const char *program_name, int argc, char **argv)
 
     printf("Listening to http://%s:%d/\n", addr, port);
 
-    Grouped_Notifications notifs = {0};
-    Reminders reminders = {0};
-    String_Builder response = {0};
-    String_Builder body = {0};
+    Serve_Context sc = {.db = db};
     for (;;) {
-        // TODO: log queries
         struct sockaddr_in client_addr;
         socklen_t client_addrlen = 0;
         int client_fd = accept(server_fd, (struct sockaddr*)&client_addr, &client_addrlen);
         if (client_fd < 0) {
             fprintf(stderr, "ERROR: Could not accept connection. This is unacceptable! %s\n", strerror(errno));
-            return_defer(false);
+            continue;
         }
 
-        if (!txn_begin(db)) return_defer(false);
-
-        if (!load_active_grouped_notifications(db, &notifs)) return_defer(false);
-        if (!load_active_reminders(db, &reminders)) return_defer(false);
-        render_index_page(&body, notifs, reminders);
-
-        sb_append_cstr(&response, "HTTP/1.0 200\r\n");
-        sb_append_cstr(&response, "Content-Type: text/html\r\n");
-        sb_append_cstr(&response, temp_sprintf("Content-Length: %zu\r\n", body.count));
-        sb_append_cstr(&response, "Connection: close\r\n");
-        sb_append_cstr(&response, "\r\n");
-        sb_append_buf(&response, body.items, body.count);
-
-        String_View untransfered = sb_to_sv(response);
-        while (untransfered.count > 0) {
-            ssize_t transfered = write(client_fd, untransfered.data, untransfered.count);
-            if (transfered < 0) {
-                fprintf(stderr, "ERROR: Could not write response: %s\n", strerror(errno));
-                break;
-            }
-            untransfered.data += transfered;
-            untransfered.count -= transfered;
+        if (txn_begin(db)) {
+            serve_request(&sc, client_fd);
+            txn_commit(db);
         }
 
+        shutdown(client_fd, SHUT_WR);
+        char buffer[4096];
+        while (read(client_fd, buffer, sizeof(buffer)) > 0);
         close(client_fd);
-
-        if (!txn_commit(db)) return_defer(false);
-
-        notifs.count = 0;
-        reminders.count = 0;
-        body.count = 0;
-        response.count = 0;
+        sc_reset(&sc);
         temp_reset();
     }
 

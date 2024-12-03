@@ -1,0 +1,9 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>%ERROR_CODE% %ERROR_NAME%</title>
+  </head>
+  <body>
+    <h1>%ERROR_CODE% %ERROR_NAME%</h1>
+  </body>
+</html>

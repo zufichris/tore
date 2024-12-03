@@ -97,6 +97,17 @@ void usage(const char *program_name)
     print_flags(build_flags, COUNT_BUILD_FLAGS);
 }
 
+bool compile_template(Cmd *cmd, const char *src_path, const char *dst_path)
+{
+    Fd index_fd = fd_open_for_write(dst_path);
+    if (index_fd == INVALID_FD) return false;;
+    cmd_append(cmd, BUILD_FOLDER"tt", src_path);
+    if (!cmd_run_sync_redirect_and_reset(cmd, (Nob_Cmd_Redirect) {
+        .fdout = &index_fd,
+    })) return false;;
+    return true;
+}
+
 int main(int argc, char **argv)
 {
     NOB_GO_REBUILD_URSELF_PLUS(argc, argv, "./src_build/flags.c");
@@ -121,12 +132,8 @@ int main(int argc, char **argv)
     builder_inputs(&cmd, SRC_BUILD_FOLDER"tt.c");
     if (!cmd_run_sync_and_reset(&cmd)) return 1;
 
-    Fd index_fd = fd_open_for_write(BUILD_FOLDER"index_page.h");
-    if (index_fd == INVALID_FD) return 1;
-    cmd_append(&cmd, BUILD_FOLDER"tt", SRC_FOLDER"index_page.h.tt");
-    if (!cmd_run_sync_redirect_and_reset(&cmd, (Nob_Cmd_Redirect) {
-        .fdout = &index_fd,
-    })) return 1;
+    if (!compile_template(&cmd, SRC_FOLDER"index_page.h.tt", BUILD_FOLDER"index_page.h")) return 1;
+    if (!compile_template(&cmd, SRC_FOLDER"error_page.h.tt", BUILD_FOLDER"error_page.h")) return 1;
 
     char *git_hash = get_git_hash(&cmd);
     builder_compiler(&cmd);
