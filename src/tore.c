@@ -819,12 +819,12 @@ void sc_reset(Serve_Context *sc)
     sc->request.count = 0;
 }
 
-// <Status-Line>\r\n<Header>\r\n<Header>\r\n<Header>\r\n<Header>\r\n<Header>\r\n\r\n
 
 void serve_request(Serve_Context *sc, int client_fd)
 {
     // TODO: log queries
 
+    // <Status-Line>\r\n<Header>\r\n<Header>\r\n<Header>\r\n<Header>\r\n<Header>\r\n\r\n
     char buffer[1024];
     size_t cur = 0;
     String_View suffix = sv_from_parts("\r\n\r\n", 4);
@@ -850,6 +850,7 @@ void serve_request(Serve_Context *sc, int client_fd)
     UNUSED(method);
     String_View uri =  sv_trim(sv_chop_by_delim(&status_line, ' '));
 
+    // TODO: serve favicon
     if (sv_eq(uri, sv_from_cstr("/"))) {
         if (!load_active_grouped_notifications(sc->db, &sc->notifs)) return;
         if (!load_active_reminders(sc->db, &sc->reminders)) return;
@@ -865,6 +866,15 @@ void serve_request(Serve_Context *sc, int client_fd)
         render_error_page(&sc->body, 413, "Request Entity Too Large");
 
         sb_append_cstr(&sc->response, "HTTP/1.0 413 Request Entity Too Large\r\n");
+        sb_append_cstr(&sc->response, "Content-Type: text/html\r\n");
+        sb_append_cstr(&sc->response, temp_sprintf("Content-Length: %zu\r\n", sc->body.count));
+        sb_append_cstr(&sc->response, "Connection: close\r\n");
+        sb_append_cstr(&sc->response, "\r\n");
+        sb_append_buf(&sc->response, sc->body.items, sc->body.count);
+    } else {
+        render_error_page(&sc->body, 404, "Not Found");
+
+        sb_append_cstr(&sc->response, "HTTP/1.0 404 Not Found\r\n");
         sb_append_cstr(&sc->response, "Content-Type: text/html\r\n");
         sb_append_cstr(&sc->response, temp_sprintf("Content-Length: %zu\r\n", sc->body.count));
         sb_append_cstr(&sc->response, "Connection: close\r\n");
