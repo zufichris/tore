@@ -5,5 +5,6 @@
   </head>
   <body>
     <h1>%ERROR_CODE% %ERROR_NAME%</h1>
+    <a href="/">Back to Home</a>
   </body>
 </html>
